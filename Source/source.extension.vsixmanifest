@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="TfsPendingChangesMargin..cbcd55b8-a0ff-4fcd-a6fc-076532c15e3f" Version="1.0" Language="en-US" Publisher="Aleksey Nagovitsyn" />
+    <DisplayName>TfsPendingChangesMargin</DisplayName>
+    <Description>A Visual Studio extension to display TFS Pending Changes on the margin of the current file.</Description>
+    <License>Resources\license.txt</License>
+    <ReleaseNotes>Resources\notes.rtf</ReleaseNotes>
+    <Icon>Resources\Icon.ico</Icon>
+    <PreviewImage>Resources\PreviewImage.png</PreviewImage>
+    <Tags>TFS,Pending changes</Tags>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Version="[12.0]" Id="Microsoft.VisualStudio.Pro" />
+    <InstallationTarget Version="[12.0]" Id="Microsoft.VisualStudio.Premium" />
+    <InstallationTarget Version="[12.0]" Id="Microsoft.VisualStudio.Ultimate" />
+    <InstallationTarget Version="[12.0]" Id="Microsoft.VisualStudio.IntegratedShell" />
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="4.5" />
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%|" />
+  </Assets>
+</PackageManifest>
