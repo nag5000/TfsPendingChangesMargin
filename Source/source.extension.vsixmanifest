@@ -8,7 +8,7 @@
     <ReleaseNotes>Resources\notes.rtf</ReleaseNotes>
     <Icon>Resources\Icon.ico</Icon>
     <PreviewImage>Resources\PreviewImage.png</PreviewImage>
-    <Tags>TFS,Pending changes</Tags>
+    <Tags>Margin,TFS,Pending changes</Tags>
   </Metadata>
   <Installation>
     <InstallationTarget Version="[12.0]" Id="Microsoft.VisualStudio.Pro" />
