@@ -432,6 +432,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="useCache">Use cached differences.</param>
         private void Redraw(bool useCache)
         {
+            if (_textView.IsClosed)
+                return;
+
             if (!_isEnabled)
             {
                 _cachedChangedLines.Clear();
@@ -504,8 +507,19 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 ITextSnapshotLine line = _textView.TextSnapshot.GetLineFromLineNumber(changedLine.Key - 1);
                 Debug.Assert(line != null, "line is null.");
 
-                IWpfTextViewLine viewLine = _textView.GetTextViewLineContainingBufferPosition(line.Start);
-                Debug.Assert(viewLine != null, "viewLine is null.");
+                IWpfTextViewLine viewLine;
+                try
+                {
+                    viewLine = _textView.GetTextViewLineContainingBufferPosition(line.Start);
+                    Debug.Assert(viewLine != null, "viewLine is null.");
+                }
+                catch (InvalidOperationException)
+                {
+                    if (_textView.IsClosed)
+                        return;
+
+                    throw;
+                }
 
                 if (rectMap.ContainsKey(viewLine.Top))
                 {
