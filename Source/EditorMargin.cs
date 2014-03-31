@@ -504,10 +504,23 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             var rectMap = new Dictionary<double, KeyValuePair<LineDiffType, Rectangle>>();
             foreach (KeyValuePair<int, LineDiffType> changedLine in _cachedChangedLines)
             {
-                ITextSnapshotLine line = _textView.TextSnapshot.GetLineFromLineNumber(changedLine.Key - 1);
-                Debug.Assert(line != null, "line is null.");
+                int lineNumber = changedLine.Key - 1;
+                LineDiffType lineDiff = changedLine.Value;
 
+                ITextSnapshotLine line;
                 IWpfTextViewLine viewLine;
+
+                try
+                {
+                    line = _textView.TextSnapshot.GetLineFromLineNumber(lineNumber);
+                    Debug.Assert(line != null, "line is null.");
+                }
+                catch (ArgumentOutOfRangeException ex)
+                {
+                    string msg = string.Format("Line number {0} is out of range [0..{1}].", lineNumber, _textView.TextSnapshot.LineCount - 1);
+                    throw new ArgumentOutOfRangeException(msg, ex);
+                }
+
                 try
                 {
                     viewLine = _textView.GetTextViewLineContainingBufferPosition(line.Start);
@@ -530,7 +543,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     #endif
 
                     KeyValuePair<LineDiffType, Rectangle> rectMapValue = rectMap[viewLine.Top];
-                    if (rectMapValue.Key != LineDiffType.Modified && rectMapValue.Key != changedLine.Value)
+                    if (rectMapValue.Key != LineDiffType.Modified && rectMapValue.Key != lineDiff)
                     {
                         rectMapValue.Value.Fill = _marginSettings.ModifiedLineMarginBrush;
                         rectMap[viewLine.Top] = new KeyValuePair<LineDiffType, Rectangle>(LineDiffType.Modified, rectMapValue.Value);
@@ -556,9 +569,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 var rect = new Rectangle { Height = viewLine.Height, Width = Width };
                 SetLeft(rect, 0);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
-                rectMap.Add(viewLine.Top, new KeyValuePair<LineDiffType, Rectangle>(changedLine.Value, rect));
+                rectMap.Add(viewLine.Top, new KeyValuePair<LineDiffType, Rectangle>(lineDiff, rect));
 
-                switch (changedLine.Value)
+                switch (lineDiff)
                 {
                     case LineDiffType.Added:
                         rect.Fill = _marginSettings.AddedLineMarginBrush;
