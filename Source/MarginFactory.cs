@@ -14,7 +14,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
     /// </summary>
     [Export(typeof(IWpfTextViewMarginProvider))]
     [Name(EditorMargin.MarginName)]
-    [Order(After = PredefinedMarginNames.LineNumber)]
+    [Order(After = PredefinedMarginNames.Spacer)]
     [Order(Before = PredefinedMarginNames.Outlining)]
     [MarginContainer(PredefinedMarginNames.LeftSelection)]
     [ContentType("text")] // Show this margin for all text-based types.
