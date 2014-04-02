@@ -729,13 +729,13 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
         {
-            if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
-            {
-                Redraw(false);
-            }
-            else if (e.VerticalTranslation)
+            if (e.VerticalTranslation)
             {
                 Redraw(true);
+            }
+            else if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
+            {
+                Redraw(false);
             }
         }
 
