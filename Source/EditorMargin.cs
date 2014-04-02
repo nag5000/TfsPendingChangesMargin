@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -87,6 +86,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Lock-object used to synchronize <see cref="GetDifference"/> method.
         /// </summary>
         private readonly object _differenceLockObject = new object();
+
+        /// <summary>
+        /// Lock-object used to synchronize the margin drawing.
+        /// </summary>
+        private readonly object _drawLockObject = new object();
 
         /// <summary>
         /// Task for observation over VersionControlItem up-dating.
@@ -291,20 +295,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         private void UpdateMargin()
         {
-            bool enabled = false;
-
             var task = new Task(() =>
             {
-                enabled = RefreshVersionControl();
-            });
-
-            task.ContinueWith(
-                t =>
+                lock (_drawLockObject)
                 {
-                    SetMarginEnabled(enabled);
-                    Redraw(false);
-                },
-                TaskScheduler.FromCurrentSynchronizationContext());
+                    bool enabled = RefreshVersionControl();
+                    Dispatcher.Invoke(() =>
+                    {
+                        SetMarginEnabled(enabled);
+                        Redraw(false);
+                    });
+                }
+            });
 
             task.Start();
         }
@@ -363,34 +365,36 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     if (_versionControlItemWatcherCancelled)
                         break;
 
-                    Item versionControlItem;
-                    try
+                    lock (_drawLockObject)
                     {
-                        versionControlItem = GetVersionControlItem();
-                    }
-                    catch (VersionControlItemNotFoundException)
-                    {
-                        Dispatcher.Invoke(() =>
+                        Item versionControlItem;
+                        try
                         {
-                            SetMarginEnabled(false);
-                            Redraw(false);
-                        });
+                            versionControlItem = GetVersionControlItem();
+                        }
+                        catch (VersionControlItemNotFoundException)
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                SetMarginEnabled(false);
+                                Redraw(false);
+                            });
+                            break;
+                        }
+                        catch (TeamFoundationServiceUnavailableException)
+                        {
+                            continue;
+                        }
 
-                        break;
-                    }
-                    catch (TeamFoundationServiceUnavailableException)
-                    {
-                        continue;
-                    }
+                        if (_versionControlItemWatcherCancelled)
+                            break;
 
-                    if (_versionControlItemWatcherCancelled)
-                        break;
-
-                    if (_versionControlItem == null || versionControlItem.CheckinDate != _versionControlItem.CheckinDate)
-                    {
-                        _versionControlItem = versionControlItem;
-                        DownloadVersionControlItem();
-                        Dispatcher.Invoke(() => Redraw(false));
+                        if (_versionControlItem == null || versionControlItem.CheckinDate != _versionControlItem.CheckinDate)
+                        {
+                            _versionControlItem = versionControlItem;
+                            DownloadVersionControlItem();
+                            Dispatcher.Invoke(() => Redraw(false));
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -447,43 +451,31 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             try
             {
-                if (!useCache)
+                if (useCache)
                 {
-                    var task = new Task(() =>
+                    DrawMargins();
+                    return;
+                }
+
+                var task = new Task(() =>
+                {
+                    lock (_drawLockObject)
                     {
-                        _cachedChangedLines = GetChangedLineNumbers();
-                    });
-
-                    // For error handling.
-                    task.ContinueWith(
-                        t =>
+                        try
                         {
-                            Debug.Assert(t.IsFaulted, "task.IsFaulted should be true.");
-                            Debug.Assert(t.Exception != null, "task.Exception is null.");
-                            Exception thrownException = t.Exception.InnerException;
-                            ShowException(thrownException);
-                        },
-                        CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnFaulted,
-                        TaskScheduler.FromCurrentSynchronizationContext());
-
-                    // If it succeeded.
-                    task.ContinueWith(
-                        t =>
+                            _cachedChangedLines = GetChangedLineNumbers();
+                        }
+                        catch (Exception ex)
                         {
-                            Debug.Assert(!t.IsFaulted, "task.IsFaulted should be false.");
-                            Redraw(true);
-                        },
-                        CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnRanToCompletion,
-                        TaskScheduler.FromCurrentSynchronizationContext());
+                            Dispatcher.Invoke(() => ShowException(ex));
+                            return;
+                        }
 
-                    task.Start();
-                }
-                else
-                {
-                    DrawMargins();                    
-                }
+                        Dispatcher.Invoke(() => Redraw(true));
+                    }
+                });
+
+                task.Start();
             }
             catch (Exception ex)
             {
@@ -731,7 +723,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
         {
-            if (e.NewOrReformattedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedLines.Count > 0 || e.TranslatedSpans.Count > 0)
+            if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
             {
                 Redraw(false);
             }
@@ -768,22 +760,25 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             {
                 var task = new Task(() =>
                 {
-                    try
+                    lock (_drawLockObject)
                     {
-                        _versionControlItem = GetVersionControlItem();
-                        DownloadVersionControlItem();
-                        Dispatcher.Invoke(() => Redraw(false));
-                    }
-                    catch (VersionControlItemNotFoundException)
-                    {
-                        Dispatcher.Invoke(() =>
+                        try
                         {
-                            SetMarginEnabled(false);
-                            Redraw(false);
-                        });
-                    }
-                    catch (TeamFoundationServiceUnavailableException)
-                    {
+                            _versionControlItem = GetVersionControlItem();
+                            DownloadVersionControlItem();
+                            Dispatcher.Invoke(() => Redraw(false));
+                        }
+                        catch (VersionControlItemNotFoundException)
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                SetMarginEnabled(false);
+                                Redraw(false);
+                            });
+                        }
+                        catch (TeamFoundationServiceUnavailableException)
+                        {
+                        }
                     }
                 });
 
