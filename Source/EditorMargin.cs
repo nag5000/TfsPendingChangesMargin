@@ -189,6 +189,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             if (!_isDisposed)
             {
                 SetMarginEnabled(false);
+                _tfExt.ProjectContextChanged -= OnTfExtProjectContextChanged;
+
+                GC.SuppressFinalize(this);
                 _isDisposed = true;
             }
         }
@@ -229,7 +232,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _tfExt = _dte.GetObject(typeof(TeamFoundationServerExt).FullName);
             Debug.Assert(_tfExt != null, "_tfExt is null.");
-            _tfExt.ProjectContextChanged += (s, e) => UpdateMargin();
+            _tfExt.ProjectContextChanged += OnTfExtProjectContextChanged;
 
             _versionControlItemWatcher = new Task(ObserveVersionControlItem);
 
@@ -749,6 +752,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Redraw(true);
         }
 
+        /// <summary>
+        /// Event handler that raised on the commit of a new check-in.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
         private void OnVersionControlCommitCheckin(object sender, CommitCheckinEventArgs e)
         {
             if (_versionControlItem == null)
@@ -781,6 +789,16 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
                 task.Start();
             }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the current project context changes.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
+        private void OnTfExtProjectContextChanged(object sender, EventArgs e)
+        {
+            UpdateMargin();
         }
 
         #endregion Event handlers
