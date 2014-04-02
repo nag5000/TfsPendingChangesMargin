@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -93,11 +94,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly object _drawLockObject = new object();
 
         /// <summary>
-        /// Task for observation over VersionControlItem up-dating.
-        /// </summary>
-        private readonly Task _versionControlItemWatcher;
-
-        /// <summary>
         /// The margin has been disposed of.
         /// </summary>
         private bool _isDisposed;
@@ -123,9 +119,14 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private Stream _versionControlItemStream;
 
         /// <summary>
-        /// Determines whether <see cref="_versionControlItemWatcher"/> is cancelled.
+        /// Task for observation over VersionControlItem up-dating.
         /// </summary>
-        private bool _versionControlItemWatcherCancelled;
+        private Task _versionControlItemWatcher;
+
+        /// <summary>
+        /// A cancellation token source for task <see cref="_versionControlItemWatcher"/>.
+        /// </summary>
+        private CancellationTokenSource _versionControlItemWatcherCts;
 
         /// <summary>
         /// Collection that contains the result of comparing the document's local file with his source control version.
@@ -238,8 +239,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Debug.Assert(_tfExt != null, "_tfExt is null.");
             _tfExt.ProjectContextChanged += OnTfExtProjectContextChanged;
 
-            _versionControlItemWatcher = new Task(ObserveVersionControlItem);
-
             UpdateMargin();
         }
 
@@ -274,9 +273,10 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _formatMap.FormatMappingChanged += OnFormatMapFormatMappingChanged;
                 _versionControl.CommitCheckin += OnVersionControlCommitCheckin;
 
-                _versionControlItemWatcherCancelled = false;
-                if (_versionControlItemWatcher.Status != TaskStatus.Running)
-                    _versionControlItemWatcher.Start(TaskScheduler.Default);
+                _versionControlItemWatcherCts = new CancellationTokenSource();
+                CancellationToken token = _versionControlItemWatcherCts.Token;
+                _versionControlItemWatcher = new Task(ObserveVersionControlItem, token, token);
+                _versionControlItemWatcher.Start(TaskScheduler.Default);
             }
             else
             {
@@ -286,7 +286,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _formatMap.FormatMappingChanged -= OnFormatMapFormatMappingChanged;
                 _versionControl.CommitCheckin -= OnVersionControlCommitCheckin;
 
-                _versionControlItemWatcherCancelled = true;
+                if (_versionControlItemWatcherCts != null)
+                    _versionControlItemWatcherCts.Cancel();
             }
         }
 
@@ -353,8 +354,10 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <summary>
         /// Observation over VersionControlItem up-dating at regular intervals.
         /// </summary>
-        private void ObserveVersionControlItem()
+        private void ObserveVersionControlItem(object cancellationTokenObject)
         {
+            var cancellationToken = (CancellationToken)cancellationTokenObject;
+
             while (true)
             {
                 try
@@ -362,7 +365,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     const int versionControlItemObservationInterval = 30000;
                     System.Threading.Thread.Sleep(versionControlItemObservationInterval);
 
-                    if (_versionControlItemWatcherCancelled)
+                    if (cancellationToken.IsCancellationRequested)
                         break;
 
                     lock (_drawLockObject)
@@ -386,7 +389,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                             continue;
                         }
 
-                        if (_versionControlItemWatcherCancelled)
+                        if (cancellationToken.IsCancellationRequested)
                             break;
 
                         if (_versionControlItem == null || versionControlItem.CheckinDate != _versionControlItem.CheckinDate)
