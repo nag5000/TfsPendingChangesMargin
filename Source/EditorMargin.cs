@@ -599,8 +599,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
         {
             var diffOptions = new DiffOptions { UseThirdPartyTool = false };
-            // TODO: make flag IgnoreWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
-            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreWhiteSpace;
+            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
+            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
 
             DiffSummary diffSummary;
 
