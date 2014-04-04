@@ -435,6 +435,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             _versionControlItemStream = new MemoryStream();
             _versionControlItem.DownloadFile().CopyTo(_versionControlItemStream);
+            AppendShiftTokenToStream(_versionControlItemStream, Encoding.GetEncoding(_versionControlItem.Encoding));
         }
 
         /// <summary>
@@ -634,10 +635,16 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Debug.Assert(_textDoc != null, "_textDoc is null.");
             Debug.Assert(_versionControl != null, "_versionControl is null.");
 
-            byte[] textBytes = _textDoc.Encoding.GetBytes(_textView.TextSnapshot.GetText());
+            Encoding sourceStreamEncoding = _textDoc.Encoding;
+            byte[] textBytes = sourceStreamEncoding.GetBytes(_textView.TextSnapshot.GetText());
             Stream sourceStream = new MemoryStream(textBytes);
+            AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
 
-            DiffSummary diffSummary = GetDifference(_versionControlItemStream, Encoding.GetEncoding(_versionControlItem.Encoding), sourceStream, _textDoc.Encoding);
+            DiffSummary diffSummary = GetDifference(
+                _versionControlItemStream, 
+                Encoding.GetEncoding(_versionControlItem.Encoding), 
+                sourceStream, 
+                sourceStreamEncoding);
 
             var dict = new Dictionary<int, LineDiffType>();
             for (int i = 0; i < diffSummary.Changes.Length; i++)
@@ -704,6 +711,20 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             }
 
             return dict;
+        }
+
+        /// <summary>
+        /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
+        /// And as a result, changes are calculated incorrectly. 
+        /// This method is called for both compared streams before comparing and adds a nonblank line to them.
+        /// </summary>
+        /// <param name="stream">Stream to which bytes will be added.</param>
+        /// <param name="encoding">Stream encoding.</param>
+        private static void AppendShiftTokenToStream(Stream stream, Encoding encoding)
+        {
+            stream.Seek(0, SeekOrigin.End);
+            byte[] eofShiftBytes = encoding.GetBytes(Environment.NewLine + "0");
+            stream.Write(eofShiftBytes, 0, eofShiftBytes.Length);
         }
 
         /// <summary>
