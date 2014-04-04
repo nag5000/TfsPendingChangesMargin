@@ -662,25 +662,25 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         {
                             int linesModified = diffChange.ModifiedLength;
                             if (linesModified > 0)
-                            {
+                {
                                 diffType = LineDiffType.Modified;
                             }
                             else
-                            {
+                    {
                                 diffType = LineDiffType.Removed;
                                 int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
                                 Debug.Assert(linesDeleted > 0);
                             }
-                        }
+                    }
                         else
                         {
                             int linesModified = diffChange.OriginalLength;
                             if (linesModified > 0)
                             {
                                 diffType = LineDiffType.Modified;
-                            }
-                            else
-                            {
+                }
+                else
+                {
                                 diffType = LineDiffType.Added;
                                 int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
                                 Debug.Assert(linesAdded > 0);
