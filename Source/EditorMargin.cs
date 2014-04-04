@@ -635,9 +635,10 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Debug.Assert(_textDoc != null, "_textDoc is null.");
             Debug.Assert(_versionControl != null, "_versionControl is null.");
 
+            Stream sourceStream = new MemoryStream();
             Encoding sourceStreamEncoding = _textDoc.Encoding;
             byte[] textBytes = sourceStreamEncoding.GetBytes(_textView.TextSnapshot.GetText());
-            Stream sourceStream = new MemoryStream(textBytes);
+            sourceStream.Write(textBytes, 0, textBytes.Length);
             AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
 
             DiffSummary diffSummary = GetDifference(
