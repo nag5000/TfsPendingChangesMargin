@@ -17,6 +17,7 @@ using EnvDTE80;
 
 using Microsoft.TeamFoundation;
 using Microsoft.TeamFoundation.Client;
+using Microsoft.TeamFoundation.Diff;
 using Microsoft.TeamFoundation.VersionControl.Client;
 using Microsoft.TeamFoundation.VersionControl.Common;
 using Microsoft.VisualStudio.Shell;
@@ -502,7 +503,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             var rectMap = new Dictionary<double, KeyValuePair<LineDiffType, Rectangle>>();
             foreach (KeyValuePair<int, LineDiffType> changedLine in _cachedChangedLines)
             {
-                int lineNumber = changedLine.Key - 1;
+                int lineNumber = changedLine.Key;
                 LineDiffType lineDiff = changedLine.Value;
 
                 ITextSnapshotLine line;
@@ -532,6 +533,20 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     throw;
                 }
 
+                switch (viewLine.VisibilityState)
+                {
+                    case VisibilityState.Unattached:
+                    case VisibilityState.Hidden:
+                        continue;
+
+                    case VisibilityState.PartiallyVisible:
+                    case VisibilityState.FullyVisible:
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
                 if (rectMap.ContainsKey(viewLine.Top))
                 {
                     #if DEBUG
@@ -548,20 +563,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     }
 
                     continue;
-                }
-
-                switch (viewLine.VisibilityState)
-                {
-                    case VisibilityState.Unattached:
-                    case VisibilityState.Hidden:
-                        continue;
-
-                    case VisibilityState.PartiallyVisible:
-                    case VisibilityState.FullyVisible:
-                        break;
-
-                    default:
-                        throw new ArgumentOutOfRangeException();
                 }
 
                 var rect = new Rectangle { Height = viewLine.Height, Width = Width };
@@ -599,8 +600,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
         {
             var diffOptions = new DiffOptions { UseThirdPartyTool = false };
-            // TODO: make flag IgnoreWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
-            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreWhiteSpace;
+            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
+            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
 
             DiffSummary diffSummary;
 
@@ -626,7 +627,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <returns>
         /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line number (one-based), the value is a type of difference.
+        /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
         /// </returns>
         private Dictionary<int, LineDiffType> GetChangedLineNumbers()
         {
@@ -637,38 +638,69 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Stream sourceStream = new MemoryStream(textBytes);
 
             DiffSummary diffSummary = GetDifference(_versionControlItemStream, Encoding.GetEncoding(_versionControlItem.Encoding), sourceStream, _textDoc.Encoding);
-            DiffSegment diffSegment = DiffSegment.Convert(diffSummary.Changes, diffSummary.OriginalLineCount, diffSummary.ModifiedLineCount);
 
             var dict = new Dictionary<int, LineDiffType>();
-            while (diffSegment != null && diffSegment.Next != null)
+            for (int i = 0; i < diffSummary.Changes.Length; i++)
             {
-                int diffLineStart = diffSegment.ModifiedStart + diffSegment.ModifiedLength + 1;
-                int diffLineEnd = diffSegment.Next.ModifiedStart;
+                IDiffChange diffChange = diffSummary.Changes[i];
+                int diffStartLineIndex = diffChange.ModifiedStart;
+                int diffEndLineIndex = diffChange.ModifiedEnd - 1;
 
-                if (diffLineEnd >= diffLineStart)
+                LineDiffType diffType;
+                switch (diffChange.ChangeType)
                 {
-                    for (int i = diffLineStart; i <= diffLineEnd; i++)
-                    {
-                        int diffLineOrigStart = diffSegment.OriginalStart + diffSegment.OriginalLength + 1;
-                        int diffLineOrigEnd = diffSegment.Next.OriginalStart;
-                        var diffType = diffLineOrigStart - diffLineOrigEnd > 0
-                            ? LineDiffType.Added
-                            : LineDiffType.Modified;
+                    case DiffChangeType.Insert:
+                        diffType = LineDiffType.Added;
+                        break;
 
-                        dict.Add(i, diffType);
-                    }
+                    case DiffChangeType.Delete:
+                        diffType = LineDiffType.Removed;
+                        break;
+
+                    case DiffChangeType.Change:
+                        if (diffChange.OriginalLength >= diffChange.ModifiedLength)
+                        {
+                            int linesModified = diffChange.ModifiedLength;
+                            if (linesModified > 0)
+                            {
+                                diffType = LineDiffType.Modified;
+                            }
+                            else
+                            {
+                                diffType = LineDiffType.Removed;
+                                int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
+                                Debug.Assert(linesDeleted > 0);
+                            }
+                        }
+                        else
+                        {
+                            int linesModified = diffChange.OriginalLength;
+                            if (linesModified > 0)
+                            {
+                                diffType = LineDiffType.Modified;
+                            }
+                            else
+                            {
+                                diffType = LineDiffType.Added;
+                                int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
+                                Debug.Assert(linesAdded > 0);
+                            }
+                        }
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+                if (diffType == LineDiffType.Removed)
+                {
+                    dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
                 }
                 else
                 {
-                    Debug.Assert(diffLineEnd - diffLineStart == -1, "The difference between diffLineEnd and diffLineStart is not equal to -1.");
-
-                    // Lines was removed between diffLineEnd and diffLineStart.
-                    dict[diffLineStart] = LineDiffType.Removed;
-                    if (diffLineEnd != 0)
-                        dict[diffLineEnd] = LineDiffType.Removed;
+                    for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
+                        dict[k] = diffType;
                 }
-
-                diffSegment = diffSegment.Next;
             }
 
             return dict;
@@ -729,13 +761,13 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
         {
-            if (e.VerticalTranslation)
-            {
-                Redraw(true);
-            }
-            else if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
+            if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
             {
                 Redraw(false);
+            }
+            else if (e.VerticalTranslation)
+            {
+                Redraw(true);
             }
         }
 
