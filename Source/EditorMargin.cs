@@ -654,60 +654,39 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 int diffStartLineIndex = diffChange.ModifiedStart;
                 int diffEndLineIndex = diffChange.ModifiedEnd - 1;
 
-                DiffChangeType diffType;
-                switch (diffChange.ChangeType)
+                DiffChangeType diffType = diffChange.ChangeType;
+                if (diffType == DiffChangeType.Change)
                 {
-                    case DiffChangeType.Insert:
-                        diffType = DiffChangeType.Insert;
-                        break;
-
-                    case DiffChangeType.Delete:
-                        diffType = DiffChangeType.Delete;
-                        break;
-
-                    case DiffChangeType.Change:
-                        if (diffChange.OriginalLength >= diffChange.ModifiedLength)
+                    if (diffChange.OriginalLength >= diffChange.ModifiedLength)
+                    {
+                        int linesModified = diffChange.ModifiedLength;
+                        if (linesModified == 0)
                         {
-                            int linesModified = diffChange.ModifiedLength;
-                            if (linesModified > 0)
-                            {
-                                diffType = DiffChangeType.Change;
-                            }
-                            else
-                            {
-                                diffType = DiffChangeType.Delete;
-                                int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
-                                Debug.Assert(linesDeleted > 0);
-                            }
+                            diffType = DiffChangeType.Delete;
+                            int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
+                            Debug.Assert(linesDeleted > 0);
                         }
-                        else
+                    }
+                    else
+                    {
+                        int linesModified = diffChange.OriginalLength;
+                        if (linesModified == 0)
                         {
-                            int linesModified = diffChange.OriginalLength;
-                            if (linesModified > 0)
-                            {
-                                diffType = DiffChangeType.Change;
-                            }
-                            else
-                            {
-                                diffType = DiffChangeType.Insert;
-                                int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
-                                Debug.Assert(linesAdded > 0);
-                            }
+                            diffType = DiffChangeType.Insert;
+                            int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
+                            Debug.Assert(linesAdded > 0);
                         }
-                        break;
-
-                    default:
-                        throw new ArgumentOutOfRangeException();
+                    }
                 }
 
-                if (diffType == DiffChangeType.Delete)
-                {
-                    dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
-                }
-                else
+                if (diffType != DiffChangeType.Delete)
                 {
                     for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
                         dict[k] = diffType;
+                }
+                else
+                {
+                    dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
                 }
             }
 
