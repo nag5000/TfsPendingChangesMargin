@@ -133,7 +133,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Collection that contains the result of comparing the document's local file with his source control version.
         /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
         /// </summary>
-        private Dictionary<int, LineDiffType> _cachedChangedLines = new Dictionary<int, LineDiffType>();
+        private Dictionary<int, DiffChangeType> _cachedChangedLines = new Dictionary<int, DiffChangeType>();
 
         #endregion Fields
 
@@ -501,11 +501,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             Children.Clear();
 
-            var rectMap = new Dictionary<double, KeyValuePair<LineDiffType, Rectangle>>();
-            foreach (KeyValuePair<int, LineDiffType> changedLine in _cachedChangedLines)
+            var rectMap = new Dictionary<double, KeyValuePair<DiffChangeType, Rectangle>>();
+            foreach (KeyValuePair<int, DiffChangeType> changedLine in _cachedChangedLines)
             {
                 int lineNumber = changedLine.Key;
-                LineDiffType lineDiff = changedLine.Value;
+                DiffChangeType lineDiff = changedLine.Value;
 
                 ITextSnapshotLine line;
                 IWpfTextViewLine viewLine;
@@ -556,11 +556,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         Debug.Assert(lineIsCollapsed, "line should be collapsed.");
                     #endif
 
-                    KeyValuePair<LineDiffType, Rectangle> rectMapValue = rectMap[viewLine.Top];
-                    if (rectMapValue.Key != LineDiffType.Modified && rectMapValue.Key != lineDiff)
+                    KeyValuePair<DiffChangeType, Rectangle> rectMapValue = rectMap[viewLine.Top];
+                    if (rectMapValue.Key != DiffChangeType.Change && rectMapValue.Key != lineDiff)
                     {
                         rectMapValue.Value.Fill = _marginSettings.ModifiedLineMarginBrush;
-                        rectMap[viewLine.Top] = new KeyValuePair<LineDiffType, Rectangle>(LineDiffType.Modified, rectMapValue.Value);
+                        rectMap[viewLine.Top] = new KeyValuePair<DiffChangeType, Rectangle>(DiffChangeType.Change, rectMapValue.Value);
                     }
 
                     continue;
@@ -569,17 +569,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 var rect = new Rectangle { Height = viewLine.Height, Width = Width };
                 SetLeft(rect, 0);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
-                rectMap.Add(viewLine.Top, new KeyValuePair<LineDiffType, Rectangle>(lineDiff, rect));
+                rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(lineDiff, rect));
 
                 switch (lineDiff)
                 {
-                    case LineDiffType.Added:
+                    case DiffChangeType.Insert:
                         rect.Fill = _marginSettings.AddedLineMarginBrush;
                         break;
-                    case LineDiffType.Modified:
+                    case DiffChangeType.Change:
                         rect.Fill = _marginSettings.ModifiedLineMarginBrush;
                         break;
-                    case LineDiffType.Removed:
+                    case DiffChangeType.Delete:
                         rect.Fill = _marginSettings.RemovedLineMarginBrush;
                         break;
                     default:
@@ -630,7 +630,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Collection that contains the result of comparing the document's local file with his source control version.
         /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
         /// </returns>
-        private Dictionary<int, LineDiffType> GetChangedLineNumbers()
+        private Dictionary<int, DiffChangeType> GetChangedLineNumbers()
         {
             Debug.Assert(_textDoc != null, "_textDoc is null.");
             Debug.Assert(_versionControl != null, "_versionControl is null.");
@@ -647,22 +647,22 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 sourceStream, 
                 sourceStreamEncoding);
 
-            var dict = new Dictionary<int, LineDiffType>();
+            var dict = new Dictionary<int, DiffChangeType>();
             for (int i = 0; i < diffSummary.Changes.Length; i++)
             {
                 IDiffChange diffChange = diffSummary.Changes[i];
                 int diffStartLineIndex = diffChange.ModifiedStart;
                 int diffEndLineIndex = diffChange.ModifiedEnd - 1;
 
-                LineDiffType diffType;
+                DiffChangeType diffType;
                 switch (diffChange.ChangeType)
                 {
                     case DiffChangeType.Insert:
-                        diffType = LineDiffType.Added;
+                        diffType = DiffChangeType.Insert;
                         break;
 
                     case DiffChangeType.Delete:
-                        diffType = LineDiffType.Removed;
+                        diffType = DiffChangeType.Delete;
                         break;
 
                     case DiffChangeType.Change:
@@ -671,11 +671,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                             int linesModified = diffChange.ModifiedLength;
                             if (linesModified > 0)
                             {
-                                diffType = LineDiffType.Modified;
+                                diffType = DiffChangeType.Change;
                             }
                             else
                             {
-                                diffType = LineDiffType.Removed;
+                                diffType = DiffChangeType.Delete;
                                 int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
                                 Debug.Assert(linesDeleted > 0);
                             }
@@ -685,11 +685,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                             int linesModified = diffChange.OriginalLength;
                             if (linesModified > 0)
                             {
-                                diffType = LineDiffType.Modified;
+                                diffType = DiffChangeType.Change;
                             }
                             else
                             {
-                                diffType = LineDiffType.Added;
+                                diffType = DiffChangeType.Insert;
                                 int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
                                 Debug.Assert(linesAdded > 0);
                             }
@@ -700,7 +700,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         throw new ArgumentOutOfRangeException();
                 }
 
-                if (diffType == LineDiffType.Removed)
+                if (diffType == DiffChangeType.Delete)
                 {
                     dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
                 }
