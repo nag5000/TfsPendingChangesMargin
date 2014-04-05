@@ -19,7 +19,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
     [MarginContainer(PredefinedMarginNames.LeftSelection)]
     [ContentType("text")] // Show this margin for all text-based types.
     [TextViewRole(PredefinedTextViewRoles.PrimaryDocument)]
-    internal sealed class MarginFactory : IWpfTextViewMarginProvider
+    internal sealed class EditorMarginFactory : IWpfTextViewMarginProvider
     {
 #pragma warning disable 0649 // Suppress warnings "Field XYZ is never assigned to, and will always have its default value null".
 

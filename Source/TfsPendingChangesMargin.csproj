@@ -69,7 +69,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="EditorMargin.cs" />
-    <Compile Include="MarginFactory.cs" />
+    <Compile Include="EditorMarginFactory.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Settings\AddedLineMarginFormatDefinition.cs" />
     <Compile Include="Settings\EditorFormatMapExtensions.cs" />
