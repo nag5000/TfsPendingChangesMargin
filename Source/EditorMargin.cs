@@ -277,7 +277,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _versionControlItemWatcherCts = new CancellationTokenSource();
                 CancellationToken token = _versionControlItemWatcherCts.Token;
                 _versionControlItemWatcher = new Task(ObserveVersionControlItem, token, token);
-                _versionControlItemWatcher.Start(TaskScheduler.Default);
+                _versionControlItemWatcher.Start();
             }
             else
             {
@@ -302,11 +302,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 lock (_drawLockObject)
                 {
                     bool enabled = RefreshVersionControl();
-                    Dispatcher.Invoke(() =>
-                    {
-                        SetMarginEnabled(enabled);
-                        Redraw(false);
-                    });
+                    SetMarginEnabled(enabled);
+                    Redraw(false);
                 }
             });
 
@@ -378,11 +375,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         }
                         catch (VersionControlItemNotFoundException)
                         {
-                            Dispatcher.Invoke(() =>
-                            {
-                                SetMarginEnabled(false);
-                                Redraw(false);
-                            });
+                            SetMarginEnabled(false);
+                            Redraw(false);
                             break;
                         }
                         catch (TeamFoundationServiceUnavailableException)
@@ -397,7 +391,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         {
                             _versionControlItem = versionControlItem;
                             DownloadVersionControlItem();
-                            Dispatcher.Invoke(() => Redraw(false));
+                            Redraw(false);
                         }
                     }
                 }
@@ -444,6 +438,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="useCache">Use cached differences.</param>
         private void Redraw(bool useCache)
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => Redraw(useCache));
+                return;
+            }
+
             if (_textView.IsClosed)
                 return;
 
@@ -472,11 +472,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         }
                         catch (Exception ex)
                         {
-                            Dispatcher.Invoke(() => ShowException(ex));
+                            ShowException(ex);
                             return;
                         }
 
-                        Dispatcher.Invoke(() => Redraw(true));
+                        Redraw(true);
                     }
                 });
 
@@ -713,6 +713,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="ex">The exception instance.</param>
         private void ShowException(Exception ex)
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => ShowException(ex));
+                return;
+            }
+
             string msg = string.Format(
                 "Unhandled exception was thrown in {0}.{2}" +
                 "Please contact with developer. You can copy this message to the Clipboard with CTRL+C.{2}{2}" +
@@ -805,15 +811,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         {
                             _versionControlItem = GetVersionControlItem();
                             DownloadVersionControlItem();
-                            Dispatcher.Invoke(() => Redraw(false));
+                            Redraw(false);
                         }
                         catch (VersionControlItemNotFoundException)
                         {
-                            Dispatcher.Invoke(() =>
-                            {
-                                SetMarginEnabled(false);
-                                Redraw(false);
-                            });
+                            SetMarginEnabled(false);
+                            Redraw(false);
                         }
                         catch (TeamFoundationServiceUnavailableException)
                         {
