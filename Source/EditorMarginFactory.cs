@@ -57,12 +57,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <returns>The <see cref="EditorMargin"/> instance.</returns>
         public IWpfTextViewMargin CreateMargin(IWpfTextViewHost textViewHost, IWpfTextViewMargin marginContainer)
         {
-            return new EditorMargin(
-                textViewHost.TextView, 
-                TextDocumentFactoryService, 
-                VsServiceProvider, 
-                OutliningManagerService, 
-                FormatMapService);
+            var marginCore = new MarginCore(textViewHost.TextView, TextDocumentFactoryService, VsServiceProvider, FormatMapService);
+            return new EditorMargin(textViewHost.TextView, OutliningManagerService, marginCore);
         }
     }
 }

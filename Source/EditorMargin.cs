@@ -1,29 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Shapes;
 
-using AlekseyNagovitsyn.TfsPendingChangesMargin.Settings;
-
-using EnvDTE;
-using EnvDTE80;
-
-using Microsoft.TeamFoundation;
-using Microsoft.TeamFoundation.Client;
 using Microsoft.TeamFoundation.Diff;
-using Microsoft.TeamFoundation.VersionControl.Client;
-using Microsoft.TeamFoundation.VersionControl.Common;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.TeamFoundation;
 using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Classification;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
 using Microsoft.VisualStudio.Text.Outlining;
@@ -40,7 +24,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <summary>
         /// The name of this margin.
         /// </summary>
-        internal const string MarginName = "TfsPendingChangesMargin";
+        internal const string MarginName = "TfsPendingChangesMargin_EditorMargin";
 
         /// <summary>
         /// The current instance of <see cref="IWpfTextView"/>.
@@ -48,92 +32,19 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly IWpfTextView _textView;
 
         /// <summary>
-        /// The current instance of <see cref="ITextDocument"/> which is associated with <see cref="_textView"/>.
-        /// </summary>
-        private readonly ITextDocument _textDoc;
-
-        /// <summary>
-        /// Visual Studio service provider.
-        /// </summary>
-// ReSharper disable once NotAccessedField.Local
-        private readonly SVsServiceProvider _vsServiceProvider;
-
-        /// <summary>
-        /// Map that contains properties from "Tools -> Environment -> Fonts and Colors" dialog in Visual Studio.
-        /// </summary>
-        private readonly IEditorFormatMap _formatMap;
-
-        /// <summary>
         /// Provides outlining functionality.
         /// </summary>
         private readonly IOutliningManager _outliningManager;
 
         /// <summary>
-        /// The top-level object in the Visual Studio automation object model.
+        /// The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.
         /// </summary>
-// ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
-        private readonly DTE2 _dte;
-
-        /// <summary>
-        /// Represents the Team Foundation Server extensibility model within Visual Studio.
-        /// </summary>
-        private readonly TeamFoundationServerExt _tfExt;
-
-        /// <summary>
-        /// The margin settings.
-        /// </summary>
-        private readonly MarginSettings _marginSettings;
-
-        /// <summary>
-        /// Lock-object used to synchronize <see cref="GetDifference"/> method.
-        /// </summary>
-        private readonly object _differenceLockObject = new object();
-
-        /// <summary>
-        /// Lock-object used to synchronize the margin drawing.
-        /// </summary>
-        private readonly object _drawLockObject = new object();
+        private readonly MarginCore _marginCore;
 
         /// <summary>
         /// The margin has been disposed of.
         /// </summary>
         private bool _isDisposed;
-
-        /// <summary>
-        /// The margin is enabled.
-        /// </summary>
-        private bool _isEnabled;
-
-        /// <summary>
-        /// Represents the version control repository.
-        /// </summary>
-        private VersionControlServer _versionControl;
-
-        /// <summary>
-        /// Represents a committed version of the <see cref="_textDoc"/> in the version control server.
-        /// </summary>
-        private Item _versionControlItem;
-
-        /// <summary>
-        /// Content of the commited version of the <see cref="_textDoc"/> in the version control server.
-        /// </summary>
-        private Stream _versionControlItemStream;
-
-        /// <summary>
-        /// Task for observation over VersionControlItem up-dating.
-        /// </summary>
-        private Task _versionControlItemWatcher;
-
-        /// <summary>
-        /// A cancellation token source for task <see cref="_versionControlItemWatcher"/>.
-        /// </summary>
-        private CancellationTokenSource _versionControlItemWatcherCts;
-
-        /// <summary>
-        /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
-        /// </summary>
-        private Dictionary<int, DiffChangeType> _cachedChangedLines = new Dictionary<int, DiffChangeType>();
 
         #endregion Fields
 
@@ -157,7 +68,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         public double MarginSize
         {
-
             get
             {
                 ThrowIfDisposed();
@@ -173,7 +83,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             get
             {
                 ThrowIfDisposed();
-                return _isEnabled;
+                return true;
             }
         }
 
@@ -194,8 +104,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             if (!_isDisposed)
             {
-                SetMarginEnabled(false);
-                _tfExt.ProjectContextChanged -= OnTfExtProjectContextChanged;
+                _marginCore.MarginRedraw -= OnMarginCoreMarginRedraw;
+                _marginCore.ExceptionThrown -= OnMarginCoreExceptionThrown;
+                _marginCore.Dispose();    
 
                 GC.SuppressFinalize(this);
                 _isDisposed = true;
@@ -208,39 +119,50 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Creates a <see cref="EditorMargin"/> for a given <see cref="IWpfTextView"/>.
         /// </summary>
         /// <param name="textView">The <see cref="IWpfTextView"/> to attach the margin to.</param>
-        /// <param name="textDocumentFactoryService">Service that creates, loads, and disposes text documents.</param>
-        /// <param name="vsServiceProvider">Visual Studio service provider.</param>
         /// <param name="outliningManagerService">Service that provides the <see cref="IOutliningManager"/>.</param>
-        /// <param name="formatMapService">Service that provides the <see cref="IEditorFormatMap"/>.</param>
-        public EditorMargin(
-            IWpfTextView textView, 
-            ITextDocumentFactoryService textDocumentFactoryService, 
-            SVsServiceProvider vsServiceProvider, 
-            IOutliningManagerService outliningManagerService, 
-            IEditorFormatMapService formatMapService)
+        /// <param name="marginCore">The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.</param>
+        public EditorMargin(IWpfTextView textView, IOutliningManagerService outliningManagerService, MarginCore marginCore)
         {
             Debug.WriteLine("Entering constructor.", MarginName);
 
-            _textView = textView;
-            if (!textDocumentFactoryService.TryGetTextDocument(_textView.TextBuffer, out _textDoc))
-            {
-                Debug.WriteLine("Can not retrieve TextDocument. Margin is disabled.", MarginName);
+            if (!marginCore.IsEnabled)
                 return;
-            }
 
             InitializeView();
 
-            _vsServiceProvider = vsServiceProvider;
-            _outliningManager = outliningManagerService.GetOutliningManager(_textView);
-            _formatMap = formatMapService.GetEditorFormatMap(textView);
-            _marginSettings = new MarginSettings(_formatMap);
-            _dte = (DTE2)vsServiceProvider.GetService(typeof(DTE));
+            _textView = textView;
+            _marginCore = marginCore;
+            _outliningManager = outliningManagerService.GetOutliningManager(textView);
 
-            _tfExt = _dte.GetObject(typeof(TeamFoundationServerExt).FullName);
-            Debug.Assert(_tfExt != null, "_tfExt is null.");
-            _tfExt.ProjectContextChanged += OnTfExtProjectContextChanged;
+            marginCore.MarginRedraw += OnMarginCoreMarginRedraw;
+            marginCore.ExceptionThrown += OnMarginCoreExceptionThrown;
 
-            UpdateMargin();
+            if (marginCore.IsActivated)
+                marginCore.RaiseMarginRedraw();
+        }
+
+        /// <summary>
+        /// Event handler that occurs when an unhandled exception was catched in <see cref="MarginCore"/>.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
+        private void OnMarginCoreExceptionThrown(object sender, ExceptionThrownEventArgs e)
+        {
+            if (!e.Handled)
+            {
+                ShowException(e.Exception);
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when margins needs to be redrawn.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
+        private void OnMarginCoreMarginRedraw(object sender, MarginRedrawEventArgs e)
+        {
+            DrawMargins(e.DiffLines);
         }
 
         /// <summary>
@@ -255,257 +177,28 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Sets the enabled state of the margin.
+        /// Draw margins for each diff line.
         /// </summary>
-        /// <param name="marginEnabled">The new enabled state to assign to the margin.</param>
-        private void SetMarginEnabled(bool marginEnabled)
-        {
-            if (_isEnabled == marginEnabled)
-                return;
-
-            _isEnabled = marginEnabled;
-            Debug.WriteLine(string.Format("MarginEnabled: {0} ({1})", marginEnabled, _textDoc.FilePath), MarginName);
-
-            if (marginEnabled)
-            {
-                _textView.LayoutChanged += OnTextViewLayoutChanged;
-                _textView.ZoomLevelChanged += OnTextViewZoomLevelChanged;
-                _textDoc.FileActionOccurred += OnTextDocFileActionOccurred;
-                _formatMap.FormatMappingChanged += OnFormatMapFormatMappingChanged;
-                _versionControl.CommitCheckin += OnVersionControlCommitCheckin;
-
-                _versionControlItemWatcherCts = new CancellationTokenSource();
-                CancellationToken token = _versionControlItemWatcherCts.Token;
-                _versionControlItemWatcher = new Task(ObserveVersionControlItem, token, token);
-                _versionControlItemWatcher.Start();
-            }
-            else
-            {
-                _textView.LayoutChanged -= OnTextViewLayoutChanged;
-                _textView.ZoomLevelChanged -= OnTextViewZoomLevelChanged;
-                _textDoc.FileActionOccurred -= OnTextDocFileActionOccurred;
-                _formatMap.FormatMappingChanged -= OnFormatMapFormatMappingChanged;
-                _versionControl.CommitCheckin -= OnVersionControlCommitCheckin;
-
-                if (_versionControlItemWatcherCts != null)
-                    _versionControlItemWatcherCts.Cancel();
-            }
-        }
-
-        /// <summary>
-        /// Refresh margin's data and redraw it.
-        /// </summary>
-        private void UpdateMargin()
-        {
-            var task = new Task(() =>
-            {
-                lock (_drawLockObject)
-                {
-                    bool enabled = RefreshVersionControl();
-                    SetMarginEnabled(enabled);
-                    Redraw(false);
-                }
-            });
-
-            task.Start();
-        }
-
-        /// <summary>
-        /// Refresh version control status and update associated fields.
-        /// </summary>
-        /// <returns>
-        /// Returns <c>false</c>, if no connection to a team project.
-        /// Returns <c>false</c>, if current text document (file) not associated with version control.
-        /// Otherwise, returns <c>true</c>.
-        /// </returns>
-        private bool RefreshVersionControl()
-        {
-            string tfsServerUriString = _tfExt.ActiveProjectContext.DomainUri;
-            if (string.IsNullOrEmpty(tfsServerUriString))
-            {
-                _versionControl = null;
-                _versionControlItem = null;
-                return false;
-            }
-
-            TfsTeamProjectCollection tfsProjCollections = TfsTeamProjectCollectionFactory.GetTeamProjectCollection(new Uri(tfsServerUriString));
-            _versionControl = (VersionControlServer)tfsProjCollections.GetService(typeof(VersionControlServer));
-            try
-            {
-                _versionControlItem = GetVersionControlItem();
-            }
-            catch (VersionControlItemNotFoundException)
-            {
-                _versionControlItem = null;
-                return false;
-            }
-            catch (TeamFoundationServiceUnavailableException)
-            {
-                _versionControlItem = null;
-                return false;
-            }
-
-            DownloadVersionControlItem();
-            return true;
-        }
-
-        /// <summary>
-        /// Observation over VersionControlItem up-dating at regular intervals.
-        /// </summary>
-        private void ObserveVersionControlItem(object cancellationTokenObject)
-        {
-            var cancellationToken = (CancellationToken)cancellationTokenObject;
-
-            while (true)
-            {
-                try
-                {
-                    const int versionControlItemObservationInterval = 30000;
-                    System.Threading.Thread.Sleep(versionControlItemObservationInterval);
-
-                    if (cancellationToken.IsCancellationRequested)
-                        break;
-
-                    lock (_drawLockObject)
-                    {
-                        Item versionControlItem;
-                        try
-                        {
-                            versionControlItem = GetVersionControlItem();
-                        }
-                        catch (VersionControlItemNotFoundException)
-                        {
-                            SetMarginEnabled(false);
-                            Redraw(false);
-                            break;
-                        }
-                        catch (TeamFoundationServiceUnavailableException)
-                        {
-                            continue;
-                        }
-
-                        if (cancellationToken.IsCancellationRequested)
-                            break;
-
-                        if (_versionControlItem == null || versionControlItem.CheckinDate != _versionControlItem.CheckinDate)
-                        {
-                            _versionControlItem = versionControlItem;
-                            DownloadVersionControlItem();
-                            Redraw(false);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("Unhandled exception in ObserveVersionControlItem: " + ex, MarginName);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Get version control item for current text document.
-        /// </summary>
-        /// <returns>Committed version of a file in the version control server.</returns>
-        /// <exception cref="VersionControlItemNotFoundException">The document file is not linked to version control.</exception>
-        /// <exception cref="TeamFoundationServiceUnavailableException">Team Foundation Service unavailable.</exception>
-        private Item GetVersionControlItem()
-        {
-            try
-            {
-                // Be careful, VersionControlServer.GetItem is slow.
-                return _versionControl.GetItem(_textDoc.FilePath, VersionSpec.Latest);
-            }
-            catch (VersionControlException ex)
-            {
-                string msg = string.Format("Item not found in repository on path \"{0}\".", _textDoc.FilePath);
-                throw new VersionControlItemNotFoundException(msg, ex);
-            }
-        }
-
-        /// <summary>
-        /// Download version control item for current text document to stream.
-        /// </summary>
-        private void DownloadVersionControlItem()
-        {
-            _versionControlItemStream = new MemoryStream();
-            _versionControlItem.DownloadFile().CopyTo(_versionControlItemStream);
-            AppendShiftTokenToStream(_versionControlItemStream, Encoding.GetEncoding(_versionControlItem.Encoding));
-        }
-
-        /// <summary>
-        /// Update difference between lines asynchronously, if needed, and redraw the margin.
-        /// </summary>
-        /// <param name="useCache">Use cached differences.</param>
-        private void Redraw(bool useCache)
+        /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
+        private void DrawMargins(Dictionary<int, DiffChangeType> diffLines)
         {
             if (!Dispatcher.CheckAccess())
             {
-                Dispatcher.Invoke(() => Redraw(useCache));
+                Dispatcher.Invoke(() => DrawMargins(diffLines));
                 return;
             }
 
-            if (_textView.IsClosed)
-                return;
-
-            if (!_isEnabled)
-            {
-                _cachedChangedLines.Clear();
-                Children.Clear();
-                return;
-            }
-
-            try
-            {
-                if (useCache)
-                {
-                    DrawMargins();
-                    return;
-                }
-
-                var task = new Task(() =>
-                {
-                    lock (_drawLockObject)
-                    {
-                        try
-                        {
-                            _cachedChangedLines = GetChangedLineNumbers();
-                        }
-                        catch (Exception ex)
-                        {
-                            ShowException(ex);
-                            return;
-                        }
-
-                        Redraw(true);
-                    }
-                });
-
-                task.Start();
-            }
-            catch (Exception ex)
-            {
-                ShowException(ex);
-            }
-        }
-
-        /// <summary>
-        /// Draw margins for each changed line.
-        /// </summary>
-        private void DrawMargins()
-        {
             Debug.Assert(_textView != null, "_textView is null.");
             Debug.Assert(_textView.TextSnapshot != null, "_textView.TextSnapshot is null.");
-            Debug.Assert(_cachedChangedLines != null, "_cachedChangedLines is null.");
             Debug.Assert(_outliningManager != null, "_outliningManager is null.");
-            Debug.Assert(_marginSettings != null, "_marginSettings is null.");
 
             Children.Clear();
 
             var rectMap = new Dictionary<double, KeyValuePair<DiffChangeType, Rectangle>>();
-            foreach (KeyValuePair<int, DiffChangeType> changedLine in _cachedChangedLines)
+            foreach (KeyValuePair<int, DiffChangeType> diffLine in diffLines)
             {
-                int lineNumber = changedLine.Key;
-                DiffChangeType lineDiff = changedLine.Value;
+                int lineNumber = diffLine.Key;
+                DiffChangeType diffType = diffLine.Value;
 
                 ITextSnapshotLine line;
                 IWpfTextViewLine viewLine;
@@ -551,15 +244,15 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 if (rectMap.ContainsKey(viewLine.Top))
                 {
                     #if DEBUG
-                        IEnumerable<ICollapsed> collapsedRegions = _outliningManager.GetCollapsedRegions(viewLine.Extent, true);
-                        bool lineIsCollapsed = collapsedRegions.Any();
-                        Debug.Assert(lineIsCollapsed, "line should be collapsed.");
+                    IEnumerable<ICollapsed> collapsedRegions = _outliningManager.GetCollapsedRegions(viewLine.Extent, true);
+                    bool lineIsCollapsed = collapsedRegions.Any();
+                    Debug.Assert(lineIsCollapsed, "line should be collapsed.");
                     #endif
 
                     KeyValuePair<DiffChangeType, Rectangle> rectMapValue = rectMap[viewLine.Top];
-                    if (rectMapValue.Key != DiffChangeType.Change && rectMapValue.Key != lineDiff)
+                    if (rectMapValue.Key != DiffChangeType.Change && rectMapValue.Key != diffType)
                     {
-                        rectMapValue.Value.Fill = _marginSettings.ModifiedLineMarginBrush;
+                        rectMapValue.Value.Fill = _marginCore.MarginSettings.ModifiedLineMarginBrush;
                         rectMap[viewLine.Top] = new KeyValuePair<DiffChangeType, Rectangle>(DiffChangeType.Change, rectMapValue.Value);
                     }
 
@@ -569,18 +262,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 var rect = new Rectangle { Height = viewLine.Height, Width = Width };
                 SetLeft(rect, 0);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
-                rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(lineDiff, rect));
+                rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(diffType, rect));
 
-                switch (lineDiff)
+                switch (diffType)
                 {
                     case DiffChangeType.Insert:
-                        rect.Fill = _marginSettings.AddedLineMarginBrush;
+                        rect.Fill = _marginCore.MarginSettings.AddedLineMarginBrush;
                         break;
                     case DiffChangeType.Change:
-                        rect.Fill = _marginSettings.ModifiedLineMarginBrush;
+                        rect.Fill = _marginCore.MarginSettings.ModifiedLineMarginBrush;
                         break;
                     case DiffChangeType.Delete:
-                        rect.Fill = _marginSettings.RemovedLineMarginBrush;
+                        rect.Fill = _marginCore.MarginSettings.RemovedLineMarginBrush;
                         break;
                     default:
                         throw new ArgumentOutOfRangeException();
@@ -591,124 +284,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Get differences between an original stream and a modified stream.
-        /// </summary>
-        /// <param name="originalStream">Original stream.</param>
-        /// <param name="originalEncoding">Encoding of original stream.</param>
-        /// <param name="modifiedStream">Modified stream.</param>
-        /// <param name="modifiedEncoding">Encoding of modified stream.</param>
-        /// <returns>A summary of the differences between two streams.</returns>
-        private DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
-        {
-            var diffOptions = new DiffOptions { UseThirdPartyTool = false };
-            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
-            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
-
-            DiffSummary diffSummary;
-
-            lock (_differenceLockObject)
-            {
-                originalStream.Position = 0;
-                modifiedStream.Position = 0;
-
-                diffSummary = DiffUtil.Diff(
-                    originalStream,
-                    originalEncoding,
-                    modifiedStream,
-                    modifiedEncoding,
-                    diffOptions,
-                    true);
-            }
-
-            return diffSummary;
-        }
-
-        /// <summary>
-        /// Get differences between the document's local file and his source control version.
-        /// </summary>
-        /// <returns>
-        /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
-        /// </returns>
-        private Dictionary<int, DiffChangeType> GetChangedLineNumbers()
-        {
-            Debug.Assert(_textDoc != null, "_textDoc is null.");
-            Debug.Assert(_versionControl != null, "_versionControl is null.");
-
-            Stream sourceStream = new MemoryStream();
-            Encoding sourceStreamEncoding = _textDoc.Encoding;
-            byte[] textBytes = sourceStreamEncoding.GetBytes(_textView.TextSnapshot.GetText());
-            sourceStream.Write(textBytes, 0, textBytes.Length);
-            AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
-
-            DiffSummary diffSummary = GetDifference(
-                _versionControlItemStream, 
-                Encoding.GetEncoding(_versionControlItem.Encoding), 
-                sourceStream, 
-                sourceStreamEncoding);
-
-            var dict = new Dictionary<int, DiffChangeType>();
-            for (int i = 0; i < diffSummary.Changes.Length; i++)
-            {
-                IDiffChange diffChange = diffSummary.Changes[i];
-                int diffStartLineIndex = diffChange.ModifiedStart;
-                int diffEndLineIndex = diffChange.ModifiedEnd - 1;
-
-                DiffChangeType diffType = diffChange.ChangeType;
-                if (diffType == DiffChangeType.Change)
-                {
-                    if (diffChange.OriginalLength >= diffChange.ModifiedLength)
-                    {
-                        int linesModified = diffChange.ModifiedLength;
-                        if (linesModified == 0)
-                        {
-                            diffType = DiffChangeType.Delete;
-                            int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
-                            Debug.Assert(linesDeleted > 0);
-                        }
-                    }
-                    else
-                    {
-                        int linesModified = diffChange.OriginalLength;
-                        if (linesModified == 0)
-                        {
-                            diffType = DiffChangeType.Insert;
-                            int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
-                            Debug.Assert(linesAdded > 0);
-                        }
-                    }
-                }
-
-                if (diffType != DiffChangeType.Delete)
-                {
-                    for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
-                        dict[k] = diffType;
-                }
-                else
-                {
-                    dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
-                }
-            }
-
-            return dict;
-        }
-
-        /// <summary>
-        /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
-        /// And as a result, changes are calculated incorrectly. 
-        /// This method is called for both compared streams before comparing and adds a nonblank line to them.
-        /// </summary>
-        /// <param name="stream">Stream to which bytes will be added.</param>
-        /// <param name="encoding">Stream encoding.</param>
-        private static void AppendShiftTokenToStream(Stream stream, Encoding encoding)
-        {
-            stream.Seek(0, SeekOrigin.End);
-            byte[] eofShiftBytes = encoding.GetBytes(Environment.NewLine + "0");
-            stream.Write(eofShiftBytes, 0, eofShiftBytes.Length);
-        }
-
-        /// <summary>
-        /// Show unhandled exception that was thrown by the margin.
+        /// Show an unhandled exception that was thrown by the margin.
         /// </summary>
         /// <param name="ex">The exception instance.</param>
         private void ShowException(Exception ex)
@@ -723,11 +299,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 "Unhandled exception was thrown in {0}.{2}" +
                 "Please contact with developer. You can copy this message to the Clipboard with CTRL+C.{2}{2}" +
                 "{1}",
-                MarginName,
+                Properties.Resources.ProductName,
                 ex,
                 Environment.NewLine);
 
-            MessageBox.Show(msg, MarginName, MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(msg, Properties.Resources.ProductName, MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         /// <summary>
@@ -738,106 +314,5 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             if (_isDisposed)
                 throw new ObjectDisposedException(MarginName);
         }
-
-        #region Event handlers
-
-        /// <summary>
-        /// Event handler that occurs when the <see cref="IWpfTextView.ZoomLevel"/> is set.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnTextViewZoomLevelChanged(object sender, ZoomLevelChangedEventArgs e)
-        {
-            Redraw(true);
-        }
-
-        /// <summary>
-        /// Event handler that occurs when the document has been loaded from or saved to disk. 
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnTextDocFileActionOccurred(object sender, TextDocumentFileActionEventArgs e)
-        {
-            Redraw(false);
-        }
-
-        /// <summary>
-        /// Event handler that occurs when the text editor performs a text line layout.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
-        {
-            if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
-            {
-                Redraw(false);
-            }
-            else if (e.VerticalTranslation)
-            {
-                Redraw(true);
-            }
-        }
-
-        /// <summary>
-        /// Event handler that occurs when <see cref="IEditorFormatMap"/> changes.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnFormatMapFormatMappingChanged(object sender, FormatItemsEventArgs e)
-        {
-            _marginSettings.Refresh();
-            Redraw(true);
-        }
-
-        /// <summary>
-        /// Event handler that raised on the commit of a new check-in.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnVersionControlCommitCheckin(object sender, CommitCheckinEventArgs e)
-        {
-            if (_versionControlItem == null)
-                return;
-
-            string serverItem = _versionControlItem.ServerItem;
-            bool itemCommitted = e.Changes.Any(change => change.ServerItem == serverItem);
-            if (itemCommitted)
-            {
-                var task = new Task(() =>
-                {
-                    lock (_drawLockObject)
-                    {
-                        try
-                        {
-                            _versionControlItem = GetVersionControlItem();
-                            DownloadVersionControlItem();
-                            Redraw(false);
-                        }
-                        catch (VersionControlItemNotFoundException)
-                        {
-                            SetMarginEnabled(false);
-                            Redraw(false);
-                        }
-                        catch (TeamFoundationServiceUnavailableException)
-                        {
-                        }
-                    }
-                });
-
-                task.Start();
-            }
-        }
-
-        /// <summary>
-        /// Event handler that occurs when the current project context changes.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnTfExtProjectContextChanged(object sender, EventArgs e)
-        {
-            UpdateMargin();
-        }
-
-        #endregion Event handlers
     }
 }
