@@ -110,9 +110,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
         /// <summary>
         /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
+        /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
         /// </summary>
-        private Dictionary<int, DiffChangeType> _cachedChangedLines = new Dictionary<int, DiffChangeType>();
+        private Dictionary<ITextSnapshotLine, DiffChangeType> _cachedChangedLines = new Dictionary<ITextSnapshotLine, DiffChangeType>();
 
         #endregion Fields
 
@@ -495,16 +495,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <returns>
         /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line number, the value is a type of difference.
+        /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
         /// </returns>
-        private Dictionary<int, DiffChangeType> GetChangedLineNumbers()
+        private Dictionary<ITextSnapshotLine, DiffChangeType> GetChangedLineNumbers()
         {
             Debug.Assert(_textDoc != null, "_textDoc is null.");
             Debug.Assert(_versionControl != null, "_versionControl is null.");
 
+            var textSnapshot = _textView.TextSnapshot;
+
             Stream sourceStream = new MemoryStream();
             Encoding sourceStreamEncoding = _textDoc.Encoding;
-            byte[] textBytes = sourceStreamEncoding.GetBytes(_textView.TextSnapshot.GetText());
+            byte[] textBytes = sourceStreamEncoding.GetBytes(textSnapshot.GetText());
             sourceStream.Write(textBytes, 0, textBytes.Length);
             AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
 
@@ -514,7 +516,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 sourceStream,
                 sourceStreamEncoding);
 
-            var dict = new Dictionary<int, DiffChangeType>();
+            var dict = new Dictionary<ITextSnapshotLine, DiffChangeType>();
             for (int i = 0; i < diffSummary.Changes.Length; i++)
             {
                 IDiffChange diffChange = diffSummary.Changes[i];
@@ -549,11 +551,15 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 if (diffType != DiffChangeType.Delete)
                 {
                     for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
-                        dict[k] = diffType;
+                    {
+                        ITextSnapshotLine line = textSnapshot.GetLineFromLineNumber(k);
+                        dict[line] = diffType;
+                    }
                 }
                 else
                 {
-                    dict[diffEndLineIndex != -1 ? diffEndLineIndex : 0] = diffType;
+                    ITextSnapshotLine line = textSnapshot.GetLineFromLineNumber(diffEndLineIndex != -1 ? diffEndLineIndex : 0);
+                    dict[line] = diffType;
                 }
             }
 

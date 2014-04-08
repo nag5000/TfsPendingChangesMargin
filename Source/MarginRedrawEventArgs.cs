@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Microsoft.TeamFoundation.Diff;
+using Microsoft.VisualStudio.Text;
 
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 {
@@ -13,12 +14,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <summary>
         /// Differences between the current document and the version in TFS.
         /// </summary>
-        private readonly Dictionary<int, DiffChangeType> _diffLines;
+        private readonly Dictionary<ITextSnapshotLine, DiffChangeType> _diffLines;
 
         /// <summary>
         /// Gets differences between the current document and the version in TFS.
         /// </summary>
-        public Dictionary<int, DiffChangeType> DiffLines
+        public Dictionary<ITextSnapshotLine, DiffChangeType> DiffLines
         {
             get { return _diffLines; }
         }
@@ -27,7 +28,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Initialize a new instance of the <see cref="MarginRedrawEventArgs"/> class.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        public MarginRedrawEventArgs(Dictionary<int, DiffChangeType> diffLines)
+        public MarginRedrawEventArgs(Dictionary<ITextSnapshotLine, DiffChangeType> diffLines)
         {
             _diffLines = diffLines;
         }

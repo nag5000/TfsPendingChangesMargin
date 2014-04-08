@@ -180,7 +180,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Draw margins for each diff line.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        private void DrawMargins(Dictionary<int, DiffChangeType> diffLines)
+        private void DrawMargins(Dictionary<ITextSnapshotLine, DiffChangeType> diffLines)
         {
             if (!Dispatcher.CheckAccess())
             {
@@ -189,30 +189,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             }
 
             Debug.Assert(_textView != null, "_textView is null.");
-            Debug.Assert(_textView.TextSnapshot != null, "_textView.TextSnapshot is null.");
             Debug.Assert(_outliningManager != null, "_outliningManager is null.");
 
             Children.Clear();
 
             var rectMap = new Dictionary<double, KeyValuePair<DiffChangeType, Rectangle>>();
-            foreach (KeyValuePair<int, DiffChangeType> diffLine in diffLines)
+            foreach (KeyValuePair<ITextSnapshotLine, DiffChangeType> diffLine in diffLines)
             {
-                int lineNumber = diffLine.Key;
+                ITextSnapshotLine line = diffLine.Key;
                 DiffChangeType diffType = diffLine.Value;
 
-                ITextSnapshotLine line;
                 IWpfTextViewLine viewLine;
-
-                try
-                {
-                    line = _textView.TextSnapshot.GetLineFromLineNumber(lineNumber);
-                    Debug.Assert(line != null, "line is null.");
-                }
-                catch (ArgumentOutOfRangeException ex)
-                {
-                    string msg = string.Format("Line number {0} is out of range [0..{1}].", lineNumber, _textView.TextSnapshot.LineCount - 1);
-                    throw new ArgumentOutOfRangeException(msg, ex);
-                }
 
                 try
                 {
@@ -225,6 +212,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         return;
 
                     throw;
+                }
+                catch (ArgumentException)
+                {
+                    // The supplied SnapshotPoint is on an incorrect snapshot (old version).
+                    return;
                 }
 
                 switch (viewLine.VisibilityState)
