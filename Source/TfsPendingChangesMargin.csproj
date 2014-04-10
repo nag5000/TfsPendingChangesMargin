@@ -79,6 +79,8 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <Compile Include="ScrollbarMargin.cs" />
+    <Compile Include="ScrollbarMarginFactory.cs" />
     <Compile Include="Settings\AddedLineMarginFormatDefinition.cs" />
     <Compile Include="Settings\EditorFormatMapExtensions.cs" />
     <Compile Include="Settings\MarginSettings.cs" />

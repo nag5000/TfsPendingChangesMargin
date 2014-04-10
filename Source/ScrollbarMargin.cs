@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Shapes;
@@ -9,38 +8,25 @@ using System.Windows.Shapes;
 using Microsoft.TeamFoundation.Diff;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
-using Microsoft.VisualStudio.Text.Formatting;
-using Microsoft.VisualStudio.Text.Outlining;
 
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 {
     /// <summary>
-    /// TFS Pending Changes Margin for the Text Editor.
+    /// TFS Pending Changes Margin on the Enhanced Scrollbar.
     /// </summary>
-    internal class EditorMargin : Canvas, IWpfTextViewMargin
+    internal class ScrollbarMargin : Canvas, IWpfTextViewMargin
     {
         #region Fields
 
         /// <summary>
         /// The name of this margin.
         /// </summary>
-        internal const string MarginName = "TfsPendingChangesMargin_EditorMargin";
+        internal const string MarginName = "TfsPendingChangesMargin_ScrollbarMargin";
 
         /// <summary>
-        /// Left indent of the margin element.
+        /// A horizontal offset of the margin element.
         /// </summary>
-        private const double MarginElementLeft = 0.5;
-
-        /// <summary>
-        /// Width of the margin element.
-        /// </summary>
-        private const double MarginElementWidth = 5;
-
-        /// <summary>
-        /// Right indent of the margin.
-        /// </summary>
-        /// <remarks>A little indent before the outline margin.</remarks>
-        private const double MarginRightIndent = 2;
+        private const double MarginElementOffset = 1.0;
 
         /// <summary>
         /// The current instance of <see cref="IWpfTextView"/>.
@@ -48,14 +34,14 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly IWpfTextView _textView;
 
         /// <summary>
-        /// Provides outlining functionality.
-        /// </summary>
-        private readonly IOutliningManager _outliningManager;
-
-        /// <summary>
         /// The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.
         /// </summary>
         private readonly MarginCore _marginCore;
+
+        /// <summary>
+        /// A vertical scroll bar in the Text Editor.
+        /// </summary>
+        private readonly IVerticalScrollBar _scrollBar;
 
         /// <summary>
         /// The margin has been disposed of.
@@ -120,9 +106,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             if (!_isDisposed)
             {
+                _scrollBar.Map.MappingChanged -= OnScrollMapMappingChanged;
                 _marginCore.MarginRedraw -= OnMarginCoreMarginRedraw;
-                _marginCore.ExceptionThrown -= OnMarginCoreExceptionThrown;
-                _marginCore.Dispose();    
+                _marginCore.Dispose();  
 
                 GC.SuppressFinalize(this);
                 _isDisposed = true;
@@ -132,26 +118,26 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         #endregion IWpfTextViewMargin Members
 
         /// <summary>
-        /// Creates a <see cref="EditorMargin"/> for a given <see cref="IWpfTextView"/>.
+        /// Creates a <see cref="ScrollbarMargin"/> for a given <see cref="IWpfTextView"/>.
         /// </summary>
         /// <param name="textView">The <see cref="IWpfTextView"/> to attach the margin to.</param>
-        /// <param name="outliningManagerService">Service that provides the <see cref="IOutliningManager"/>.</param>
-        /// <param name="marginCore">The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.</param>
-        public EditorMargin(IWpfTextView textView, IOutliningManagerService outliningManagerService, MarginCore marginCore)
+        /// <param name="marginContainer">Margin container. Is defined in the <see cref="ScrollbarMarginFactory"/> by the <see cref="MarginContainerAttribute"/>.</param>
+        /// <param name="marginCore">The class which receives, processes and provides necessary data for <see cref="ScrollbarMargin"/>.</param>
+        public ScrollbarMargin(IWpfTextView textView, IWpfTextViewMargin marginContainer, MarginCore marginCore)
         {
             Debug.WriteLine("Entering constructor.", MarginName);
 
-            if (!marginCore.IsEnabled)
-                return;
+            _textView = textView;
+            _marginCore = marginCore;
 
             InitializeLayout();
 
-            _textView = textView;
-            _marginCore = marginCore;
-            _outliningManager = outliningManagerService.GetOutliningManager(textView);
+            ITextViewMargin scrollBarMargin = marginContainer.GetTextViewMargin(PredefinedMarginNames.VerticalScrollBar);
+            // ReSharper disable once SuspiciousTypeConversion.Global - scrollBarMargin is IVerticalScrollBar.
+            _scrollBar = (IVerticalScrollBar)scrollBarMargin;
 
             marginCore.MarginRedraw += OnMarginCoreMarginRedraw;
-            marginCore.ExceptionThrown += OnMarginCoreExceptionThrown;
+            _scrollBar.Map.MappingChanged += OnScrollMapMappingChanged;
 
             if (marginCore.IsActivated)
                 DrawMargins(marginCore.GetChangedLines());
@@ -162,22 +148,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         private void InitializeLayout()
         {
-            Width = MarginElementWidth + MarginRightIndent;
-            ClipToBounds = true;
-        }
-
-        /// <summary>
-        /// Event handler that occurs when an unhandled exception was catched in <see cref="MarginCore"/>.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnMarginCoreExceptionThrown(object sender, ExceptionThrownEventArgs e)
-        {
-            if (!e.Handled)
-            {
-                ShowException(e.Exception);
-                e.Handled = true;
-            }
+            Width = _textView.Options.GetOptionValue(DefaultTextViewHostOptions.ChangeTrackingMarginWidthOptionId);
         }
 
         /// <summary>
@@ -188,6 +159,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private void OnMarginCoreMarginRedraw(object sender, MarginRedrawEventArgs e)
         {
             DrawMargins(e.DiffLines);
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the mapping has changed between a character position and its vertical fraction. 
+        /// For example, the view may have re-rendered some lines, changing their font size.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
+        private void OnScrollMapMappingChanged(object sender, EventArgs e)
+        {
+            DrawMargins(_marginCore.GetChangedLines());
         }
 
         /// <summary>
@@ -202,30 +184,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 return;
             }
 
-            Debug.Assert(_textView != null, "_textView is null.");
-            Debug.Assert(_outliningManager != null, "_outliningManager is null.");
-
             Children.Clear();
 
-            var rectMap = new Dictionary<double, KeyValuePair<DiffChangeType, Rectangle>>();
             foreach (KeyValuePair<ITextSnapshotLine, DiffChangeType> diffLine in diffLines)
             {
                 ITextSnapshotLine line = diffLine.Key;
                 DiffChangeType diffType = diffLine.Value;
 
-                IWpfTextViewLine viewLine;
-
+                double top, bottom;
                 try
                 {
-                    viewLine = _textView.GetTextViewLineContainingBufferPosition(line.Start);
-                    Debug.Assert(viewLine != null, "viewLine is null.");
-                }
-                catch (InvalidOperationException)
-                {
-                    if (_textView.IsClosed)
-                        return;
-
-                    throw;
+                    MapLineToPixels(line, out top, out bottom);
                 }
                 catch (ArgumentException)
                 {
@@ -233,42 +202,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     return;
                 }
 
-                switch (viewLine.VisibilityState)
-                {
-                    case VisibilityState.Unattached:
-                    case VisibilityState.Hidden:
-                        continue;
-
-                    case VisibilityState.PartiallyVisible:
-                    case VisibilityState.FullyVisible:
-                        break;
-
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-
-                if (rectMap.ContainsKey(viewLine.Top))
-                {
-                    #if DEBUG
-                    IEnumerable<ICollapsed> collapsedRegions = _outliningManager.GetCollapsedRegions(viewLine.Extent, true);
-                    bool lineIsCollapsed = collapsedRegions.Any();
-                    Debug.Assert(lineIsCollapsed, "line should be collapsed.");
-                    #endif
-
-                    KeyValuePair<DiffChangeType, Rectangle> rectMapValue = rectMap[viewLine.Top];
-                    if (rectMapValue.Key != DiffChangeType.Change && rectMapValue.Key != diffType)
-                    {
-                        rectMapValue.Value.Fill = _marginCore.MarginSettings.ModifiedLineMarginBrush;
-                        rectMap[viewLine.Top] = new KeyValuePair<DiffChangeType, Rectangle>(DiffChangeType.Change, rectMapValue.Value);
-                    }
-
-                    continue;
-                }
-
-                var rect = new Rectangle { Height = viewLine.Height, Width = MarginElementWidth };
-                SetLeft(rect, MarginElementLeft);
-                SetTop(rect, viewLine.Top - _textView.ViewportTop);
-                rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(diffType, rect));
+                var rect = new Rectangle { Height = bottom - top, Width = Width - MarginElementOffset, Focusable = false, IsHitTestVisible = false };
+                SetLeft(rect, MarginElementOffset);
+                SetTop(rect, top);
 
                 switch (diffType)
                 {
@@ -290,26 +226,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Show an unhandled exception that was thrown by the margin.
+        /// Get top and bottom of a line for the scrollbar.
         /// </summary>
-        /// <param name="ex">The exception instance.</param>
-        private void ShowException(Exception ex)
+        /// <param name="line">A line of text from an <see cref="ITextSnapshot"/>.</param>
+        /// <param name="top">Top coordinate for the scrollbar.</param>
+        /// <param name="bottom">Bottom coordinate for the scrollbar.</param>
+        /// <exception cref="ArgumentException">The supplied <see cref="SnapshotPoint"/> is on an incorrect snapshot.</exception>
+        private void MapLineToPixels(ITextSnapshotLine line, out double top, out double bottom)
         {
-            if (!Dispatcher.CheckAccess())
-            {
-                Dispatcher.Invoke(() => ShowException(ex));
-                return;
-            }
-
-            string msg = string.Format(
-                "Unhandled exception was thrown in {0}.{2}" +
-                "Please contact with developer. You can copy this message to the Clipboard with CTRL+C.{2}{2}" +
-                "{1}",
-                Properties.Resources.ProductName,
-                ex,
-                Environment.NewLine);
-
-            MessageBox.Show(msg, Properties.Resources.ProductName, MessageBoxButton.OK, MessageBoxImage.Error);
+            double mapTop = _scrollBar.Map.GetCoordinateAtBufferPosition(line.Start) - 0.5;
+            double mapBottom = _scrollBar.Map.GetCoordinateAtBufferPosition(line.End) + 0.5;
+            top = Math.Round(_scrollBar.GetYCoordinateOfScrollMapPosition(mapTop)) - 2.0;
+            bottom = Math.Round(_scrollBar.GetYCoordinateOfScrollMapPosition(mapBottom)) + 2.0;
         }
 
         /// <summary>
