@@ -154,7 +154,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             marginCore.ExceptionThrown += OnMarginCoreExceptionThrown;
 
             if (marginCore.IsActivated)
-                marginCore.RaiseMarginRedraw();
+                DrawMargins(marginCore.GetChangedLines());
         }
 
         /// <summary>
@@ -194,7 +194,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Draw margins for each diff line.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        private void DrawMargins(Dictionary<ITextSnapshotLine, DiffChangeType> diffLines)
+        private void DrawMargins(IDictionary<ITextSnapshotLine, DiffChangeType> diffLines)
         {
             if (!Dispatcher.CheckAccess())
             {

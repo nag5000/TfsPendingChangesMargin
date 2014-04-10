@@ -14,12 +14,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <summary>
         /// Differences between the current document and the version in TFS.
         /// </summary>
-        private readonly Dictionary<ITextSnapshotLine, DiffChangeType> _diffLines;
+        private readonly IDictionary<ITextSnapshotLine, DiffChangeType> _diffLines;
 
         /// <summary>
         /// Gets differences between the current document and the version in TFS.
         /// </summary>
-        public Dictionary<ITextSnapshotLine, DiffChangeType> DiffLines
+        public IDictionary<ITextSnapshotLine, DiffChangeType> DiffLines
         {
             get { return _diffLines; }
         }
@@ -28,7 +28,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Initialize a new instance of the <see cref="MarginRedrawEventArgs"/> class.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        public MarginRedrawEventArgs(Dictionary<ITextSnapshotLine, DiffChangeType> diffLines)
+        public MarginRedrawEventArgs(IDictionary<ITextSnapshotLine, DiffChangeType> diffLines)
         {
             _diffLines = diffLines;
         }

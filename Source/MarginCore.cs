@@ -141,6 +141,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Gets cached differences between the current document and the version in TFS.
+        /// </summary>
+        /// <returns>
+        /// Collection that contains the result of comparing the document's local file with his source control version.
+        /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
+        /// </returns>
+        public IDictionary<ITextSnapshotLine, DiffChangeType> GetChangedLines()
+        {
+            return _cachedChangedLines;
+        }
+
+        /// <summary>
         /// Event that raised when margins needs to be redrawn: 
         /// differences between text document and TFS item were changed or document layout was changed.
         /// </summary>
@@ -203,16 +215,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Raises the <see cref="MarginRedraw"/> event.
-        /// </summary>
-        internal void RaiseMarginRedraw()
-        {
-            var eventHandler = MarginRedraw;
-            if (eventHandler != null)
-                eventHandler(this, new MarginRedrawEventArgs(_cachedChangedLines));
-        }
-
-        /// <summary>
         /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
         /// And as a result, changes are calculated incorrectly. 
         /// This method is called for both compared streams before comparing and adds a nonblank line to them.
@@ -241,6 +243,16 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Raises the <see cref="MarginRedraw"/> event.
+        /// </summary>
+        private void RaiseMarginRedraw()
+        {
+            var eventHandler = MarginRedraw;
+            if (eventHandler != null)
+                eventHandler(this, new MarginRedrawEventArgs(_cachedChangedLines));
         }
 
         /// <summary>
@@ -630,7 +642,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             {
                 Redraw(false);
             }
-            else if (e.VerticalTranslation)
+            else if (e.VerticalTranslation || e.NewOrReformattedSpans.Count > 0)
             {
                 Redraw(true);
             }
