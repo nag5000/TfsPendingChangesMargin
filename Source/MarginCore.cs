@@ -213,6 +213,37 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
+        /// And as a result, changes are calculated incorrectly. 
+        /// This method is called for both compared streams before comparing and adds a nonblank line to them.
+        /// </summary>
+        /// <param name="stream">Stream to which bytes will be added.</param>
+        /// <param name="encoding">Stream encoding.</param>
+        private static void AppendShiftTokenToStream(Stream stream, Encoding encoding)
+        {
+            stream.Seek(0, SeekOrigin.End);
+            byte[] eofShiftBytes = encoding.GetBytes(Environment.NewLine + "0");
+            stream.Write(eofShiftBytes, 0, eofShiftBytes.Length);
+        }
+
+        /// <summary>
+        /// Checks whether there are any changes between two <see cref="ITextBuffer"/> versions.
+        /// </summary>
+        /// <param name="oldVersion">An old text version.</param>
+        /// <param name="currentVersion">The current text version.</param>
+        /// <returns>Returns <c>true</c> if there are changes between two versions.</returns>
+        private static bool AnyTextChanges(ITextVersion oldVersion, ITextVersion currentVersion)
+        {
+            for (; oldVersion != currentVersion; oldVersion = oldVersion.Next)
+            {
+                if (oldVersion.Changes.Count > 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Raises the <see cref="ExceptionThrown"/> event.
         /// </summary>
         /// <param name="exception">The exception that was thrown.</param>
@@ -566,20 +597,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             return dict;
         }
 
-        /// <summary>
-        /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
-        /// And as a result, changes are calculated incorrectly. 
-        /// This method is called for both compared streams before comparing and adds a nonblank line to them.
-        /// </summary>
-        /// <param name="stream">Stream to which bytes will be added.</param>
-        /// <param name="encoding">Stream encoding.</param>
-        private void AppendShiftTokenToStream(Stream stream, Encoding encoding)
-        {
-            stream.Seek(0, SeekOrigin.End);
-            byte[] eofShiftBytes = encoding.GetBytes(Environment.NewLine + "0");
-            stream.Write(eofShiftBytes, 0, eofShiftBytes.Length);
-        }
-
         #region Event handlers
 
         /// <summary>
@@ -609,7 +626,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
         {
-            if (e.NewOrReformattedLines.Count > 0 || e.TranslatedLines.Count > 0 || e.NewOrReformattedSpans.Count > 0 || e.TranslatedSpans.Count > 0)
+            if (AnyTextChanges(e.OldViewState.EditSnapshot.Version, e.NewViewState.EditSnapshot.Version))
             {
                 Redraw(false);
             }
