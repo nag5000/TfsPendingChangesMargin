@@ -27,6 +27,22 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         internal const string MarginName = "TfsPendingChangesMargin_EditorMargin";
 
         /// <summary>
+        /// Left indent of the margin element.
+        /// </summary>
+        private const double MarginElementLeft = 0.5;
+
+        /// <summary>
+        /// Width of the margin element.
+        /// </summary>
+        private const double MarginElementWidth = 5;
+
+        /// <summary>
+        /// Right indent of the margin.
+        /// </summary>
+        /// <remarks>A little indent before the outline margin.</remarks>
+        private const double MarginRightIndent = 2;
+
+        /// <summary>
         /// The current instance of <see cref="IWpfTextView"/>.
         /// </summary>
         private readonly IWpfTextView _textView;
@@ -128,7 +144,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             if (!marginCore.IsEnabled)
                 return;
 
-            InitializeView();
+            InitializeLayout();
 
             _textView = textView;
             _marginCore = marginCore;
@@ -166,13 +182,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Initialize view.
+        /// Initialize layout.
         /// </summary>
-        private void InitializeView()
+        private void InitializeLayout()
         {
-            // A little indent before the outline margin.
-            Margin = new Thickness(0, 0, 2, 0);
-            Width = 5;
+            Width = MarginElementWidth + MarginRightIndent;
             ClipToBounds = true;
         }
 
@@ -251,8 +265,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     continue;
                 }
 
-                var rect = new Rectangle { Height = viewLine.Height, Width = Width };
-                SetLeft(rect, 0);
+                var rect = new Rectangle { Height = viewLine.Height, Width = MarginElementWidth };
+                SetLeft(rect, MarginElementLeft);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
                 rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(diffType, rect));
 
