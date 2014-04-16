@@ -68,6 +68,10 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DiffLineEntry.cs" />
+    <Compile Include="DiffLinesCollection.cs" />
+    <Compile Include="MarginCoreFactory.cs" />
+    <Compile Include="MarginDrawReason.cs" />
     <Compile Include="MarginRedrawEventArgs.cs" />
     <Compile Include="EditorMargin.cs" />
     <Compile Include="EditorMarginFactory.cs" />

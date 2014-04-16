@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -59,6 +58,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly MarginSettings _marginSettings;
 
         /// <summary>
+        /// Defines the mapping between character positions and scrollmap coordinates.
+        /// </summary>
+        private readonly IScrollMap _scrollMap;
+
+        /// <summary>
         /// Lock-object used to synchronize <see cref="GetDifference"/> method.
         /// </summary>
         private readonly object _differenceLockObject = new object();
@@ -110,9 +114,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
         /// <summary>
         /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
         /// </summary>
-        private Dictionary<ITextSnapshotLine, DiffChangeType> _cachedChangedLines = new Dictionary<ITextSnapshotLine, DiffChangeType>();
+        private DiffLinesCollection _cachedChangedLines = new DiffLinesCollection();
 
         #endregion Fields
 
@@ -145,9 +148,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <returns>
         /// Collection that contains the result of comparing the document's local file with his source control version.
-        /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
         /// </returns>
-        public IDictionary<ITextSnapshotLine, DiffChangeType> GetChangedLines()
+        public DiffLinesCollection GetChangedLines()
         {
             return _cachedChangedLines;
         }
@@ -170,11 +172,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="textDocumentFactoryService">Service that creates, loads, and disposes text documents.</param>
         /// <param name="vsServiceProvider">Visual Studio service provider.</param>
         /// <param name="formatMapService">Service that provides the <see cref="IEditorFormatMap"/>.</param>
-        public MarginCore(
-            IWpfTextView textView, 
-            ITextDocumentFactoryService textDocumentFactoryService, 
-            SVsServiceProvider vsServiceProvider, 
-            IEditorFormatMapService formatMapService)
+        /// <param name="scrollMapFactoryService">Factory that creates or reuses an <see cref="IScrollMap"/> for an <see cref="ITextView"/>.</param>
+        public MarginCore(IWpfTextView textView, ITextDocumentFactoryService textDocumentFactoryService, SVsServiceProvider vsServiceProvider, IEditorFormatMapService formatMapService, IScrollMapFactoryService scrollMapFactoryService)
         {
             Debug.WriteLine("Entering constructor.", Properties.Resources.ProductName);
 
@@ -188,6 +187,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _formatMap = formatMapService.GetEditorFormatMap(textView);
             _marginSettings = new MarginSettings(_formatMap);
+
+            _scrollMap = scrollMapFactoryService.Create(textView);
 
             var dte = (DTE2)vsServiceProvider.GetService(typeof(DTE));
             _tfExt = dte.GetObject(typeof(TeamFoundationServerExt).FullName);
@@ -246,13 +247,40 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Adds a line of text from an <see cref="ITextSnapshot"/> to <see cref="DiffLinesCollection"/>.
+        /// </summary>
+        /// <param name="collection">Collection of differences between the current document and the version in TFS.</param>
+        /// <param name="textSnapshot">The text snapshot.</param>
+        /// <param name="lineNumber">The line number.</param>
+        /// <param name="lineDiffType">Difference type of the line.</param>
+        private static void AddLineToDiffLinesCollection(DiffLinesCollection collection, ITextSnapshot textSnapshot, int lineNumber, DiffChangeType lineDiffType)
+        {
+            if (lineNumber == -1 && lineDiffType == DiffChangeType.Delete)
+                lineNumber = 0;
+
+            ITextSnapshotLine line;
+            try
+            {
+                line = textSnapshot.GetLineFromLineNumber(lineNumber);
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                string msg = string.Format("Line number {0} is out of range [0..{1}].", lineNumber, textSnapshot.LineCount);
+                throw new ArgumentOutOfRangeException(msg, ex);
+            }
+
+            collection[lineDiffType].Add(line);
+        }
+
+        /// <summary>
         /// Raises the <see cref="MarginRedraw"/> event.
         /// </summary>
-        private void RaiseMarginRedraw()
+        /// <param name="reason">The reason of redrawing.</param>
+        private void RaiseMarginRedraw(MarginDrawReason reason)
         {
             var eventHandler = MarginRedraw;
             if (eventHandler != null)
-                eventHandler(this, new MarginRedrawEventArgs(_cachedChangedLines));
+                eventHandler(this, new MarginRedrawEventArgs(_cachedChangedLines, reason));
         }
 
         /// <summary>
@@ -289,6 +317,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _textDoc.FileActionOccurred += OnTextDocFileActionOccurred;
                 _formatMap.FormatMappingChanged += OnFormatMapFormatMappingChanged;
                 _versionControl.CommitCheckin += OnVersionControlCommitCheckin;
+                _scrollMap.MappingChanged += OnScrollMapMappingChanged;
 
                 _versionControlItemWatcherCts = new CancellationTokenSource();
                 CancellationToken token = _versionControlItemWatcherCts.Token;
@@ -302,6 +331,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _textDoc.FileActionOccurred -= OnTextDocFileActionOccurred;
                 _formatMap.FormatMappingChanged -= OnFormatMapFormatMappingChanged;
                 _versionControl.CommitCheckin -= OnVersionControlCommitCheckin;
+                _scrollMap.MappingChanged -= OnScrollMapMappingChanged;
 
                 if (_versionControlItemWatcherCts != null)
                     _versionControlItemWatcherCts.Cancel();
@@ -319,7 +349,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 {
                     bool success = RefreshVersionControl();
                     SetMarginActivated(success);
-                    Redraw(false);
+                    Redraw(false, MarginDrawReason.InternalReason);
                 }
             });
 
@@ -393,7 +423,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         catch (VersionControlItemNotFoundException)
                         {
                             SetMarginActivated(false);
-                            Redraw(false);
+                            Redraw(false, MarginDrawReason.InternalReason);
                             break;
                         }
                         catch (TeamFoundationServiceUnavailableException)
@@ -408,7 +438,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         {
                             _versionControlItem = versionControlItem;
                             DownloadVersionControlItem();
-                            Redraw(false);
+                            Redraw(false, MarginDrawReason.VersionControlItemChanged);
                         }
                     }
                 }
@@ -453,7 +483,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Update difference between lines asynchronously, if needed, and redraw the margin.
         /// </summary>
         /// <param name="useCache">Use cached differences.</param>
-        private void Redraw(bool useCache)
+        /// <param name="reason">The reason of redrawing.</param>
+        private void Redraw(bool useCache, MarginDrawReason reason)
         {
             try
             {
@@ -463,13 +494,13 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 if (!_isActivated)
                 {
                     _cachedChangedLines.Clear();
-                    RaiseMarginRedraw();
+                    RaiseMarginRedraw(reason);
                     return;
                 }
 
                 if (useCache)
                 {
-                    RaiseMarginRedraw();
+                    RaiseMarginRedraw(reason);
                     return;
                 }
 
@@ -487,7 +518,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                             return;
                         }
 
-                        Redraw(true);
+                        Redraw(true, reason);
                     }
                 });
 
@@ -540,7 +571,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Collection that contains the result of comparing the document's local file with his source control version.
         /// <para/>Each element is a pair of key and value: the key is a line of text, the value is a type of difference.
         /// </returns>
-        private Dictionary<ITextSnapshotLine, DiffChangeType> GetChangedLineNumbers()
+        private DiffLinesCollection GetChangedLineNumbers()
         {
             Debug.Assert(_textDoc != null, "_textDoc is null.");
             Debug.Assert(_versionControl != null, "_versionControl is null.");
@@ -559,7 +590,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 sourceStream,
                 sourceStreamEncoding);
 
-            var dict = new Dictionary<ITextSnapshotLine, DiffChangeType>();
+            var dict = new DiffLinesCollection();
             for (int i = 0; i < diffSummary.Changes.Length; i++)
             {
                 IDiffChange diffChange = diffSummary.Changes[i];
@@ -594,15 +625,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 if (diffType != DiffChangeType.Delete)
                 {
                     for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
-                    {
-                        ITextSnapshotLine line = textSnapshot.GetLineFromLineNumber(k);
-                        dict[line] = diffType;
-                    }
+                        AddLineToDiffLinesCollection(dict, textSnapshot, k, diffType);
                 }
                 else
                 {
-                    ITextSnapshotLine line = textSnapshot.GetLineFromLineNumber(diffEndLineIndex != -1 ? diffEndLineIndex : 0);
-                    dict[line] = diffType;
+                    AddLineToDiffLinesCollection(dict, textSnapshot, diffEndLineIndex, diffType);
                 }
             }
 
@@ -618,7 +645,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextViewZoomLevelChanged(object sender, ZoomLevelChangedEventArgs e)
         {
-            Redraw(true);
+            Redraw(true, MarginDrawReason.TextViewZoomLevelChanged);
         }
 
         /// <summary>
@@ -628,7 +655,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnTextDocFileActionOccurred(object sender, TextDocumentFileActionEventArgs e)
         {
-            Redraw(false);
+            Redraw(false, MarginDrawReason.TextDocFileActionOccurred);
         }
 
         /// <summary>
@@ -639,13 +666,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private void OnTextViewLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
         {
             if (AnyTextChanges(e.OldViewState.EditSnapshot.Version, e.NewViewState.EditSnapshot.Version))
-            {
-                Redraw(false);
-            }
+                Redraw(false, MarginDrawReason.TextViewTextChanged);
             else if (e.VerticalTranslation || e.NewOrReformattedSpans.Count > 0)
-            {
-                Redraw(true);
-            }
+                Redraw(true, MarginDrawReason.TextViewLayoutChanged);
         }
 
         /// <summary>
@@ -656,7 +679,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private void OnFormatMapFormatMappingChanged(object sender, FormatItemsEventArgs e)
         {
             _marginSettings.Refresh();
-            Redraw(true);
+            Redraw(true, MarginDrawReason.EditorFormatMapChanged);
         }
 
         /// <summary>
@@ -681,12 +704,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         {
                             _versionControlItem = GetVersionControlItem();
                             DownloadVersionControlItem();
-                            Redraw(false);
+                            Redraw(false, MarginDrawReason.VersionControlItemChanged);
                         }
                         catch (VersionControlItemNotFoundException)
                         {
                             SetMarginActivated(false);
-                            Redraw(false);
+                            Redraw(false, MarginDrawReason.InternalReason);
                         }
                         catch (TeamFoundationServiceUnavailableException)
                         {
@@ -706,6 +729,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private void OnTfExtProjectContextChanged(object sender, EventArgs e)
         {
             UpdateMargin();
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the mapping has changed between a character position and its vertical fraction. 
+        /// For example, the view may have re-rendered some lines, changing their font size.
+        /// </summary>
+        /// <param name="sender">Event sender.</param>
+        /// <param name="e">Event arguments.</param>
+        private void OnScrollMapMappingChanged(object sender, EventArgs e)
+        {
+            Redraw(true, MarginDrawReason.ScrollMapMappingChanged);
         }
 
         #endregion Event handlers

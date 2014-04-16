@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -106,7 +105,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             if (!_isDisposed)
             {
-                _scrollBar.Map.MappingChanged -= OnScrollMapMappingChanged;
                 _marginCore.MarginRedraw -= OnMarginCoreMarginRedraw;
                 _marginCore.Dispose();  
 
@@ -137,7 +135,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             _scrollBar = (IVerticalScrollBar)scrollBarMargin;
 
             marginCore.MarginRedraw += OnMarginCoreMarginRedraw;
-            _scrollBar.Map.MappingChanged += OnScrollMapMappingChanged;
 
             if (marginCore.IsActivated)
                 DrawMargins(marginCore.GetChangedLines());
@@ -158,25 +155,31 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnMarginCoreMarginRedraw(object sender, MarginRedrawEventArgs e)
         {
-            DrawMargins(e.DiffLines);
-        }
+            switch (e.Reason)
+            {
+                case MarginDrawReason.InternalReason:
+                case MarginDrawReason.VersionControlItemChanged:
+                case MarginDrawReason.TextViewZoomLevelChanged:
+                case MarginDrawReason.TextDocFileActionOccurred:
+                case MarginDrawReason.TextViewTextChanged:
+                case MarginDrawReason.EditorFormatMapChanged:
+                case MarginDrawReason.ScrollMapMappingChanged:
+                    DrawMargins(e.DiffLines);
+                    break;
 
-        /// <summary>
-        /// Event handler that occurs when the mapping has changed between a character position and its vertical fraction. 
-        /// For example, the view may have re-rendered some lines, changing their font size.
-        /// </summary>
-        /// <param name="sender">Event sender.</param>
-        /// <param name="e">Event arguments.</param>
-        private void OnScrollMapMappingChanged(object sender, EventArgs e)
-        {
-            DrawMargins(_marginCore.GetChangedLines());
+                case MarginDrawReason.TextViewLayoutChanged:
+                    return;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
         }
 
         /// <summary>
         /// Draw margins for each diff line.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        private void DrawMargins(IDictionary<ITextSnapshotLine, DiffChangeType> diffLines)
+        private void DrawMargins(DiffLinesCollection diffLines)
         {
             if (!Dispatcher.CheckAccess())
             {
@@ -185,28 +188,31 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             }
 
             Children.Clear();
-
-            foreach (KeyValuePair<ITextSnapshotLine, DiffChangeType> diffLine in diffLines)
+            
+            foreach (DiffLineEntry diffLine in diffLines)
             {
-                ITextSnapshotLine line = diffLine.Key;
-                DiffChangeType diffType = diffLine.Value;
-
                 double top, bottom;
                 try
                 {
-                    MapLineToPixels(line, out top, out bottom);
+                    MapLineToPixels(diffLine.Line, out top, out bottom);
                 }
                 catch (ArgumentException)
                 {
-                    // The supplied SnapshotPoint is on an incorrect snapshot (old version).
+                    // The supplied line is on an incorrect snapshot (old version).
                     return;
                 }
 
-                var rect = new Rectangle { Height = bottom - top, Width = Width - MarginElementOffset, Focusable = false, IsHitTestVisible = false };
+                var rect = new Rectangle
+                {
+                    Height = bottom - top,
+                    Width = Width - MarginElementOffset,
+                    Focusable = false,
+                    IsHitTestVisible = false
+                };
                 SetLeft(rect, MarginElementOffset);
                 SetTop(rect, top);
 
-                switch (diffType)
+                switch (diffLine.ChangeType)
                 {
                     case DiffChangeType.Insert:
                         rect.Fill = _marginCore.MarginSettings.AddedLineMarginBrush;
@@ -231,7 +237,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="line">A line of text from an <see cref="ITextSnapshot"/>.</param>
         /// <param name="top">Top coordinate for the scrollbar.</param>
         /// <param name="bottom">Bottom coordinate for the scrollbar.</param>
-        /// <exception cref="ArgumentException">The supplied <see cref="SnapshotPoint"/> is on an incorrect snapshot.</exception>
+        /// <exception cref="ArgumentException">The supplied <see cref="ITextSnapshotLine"/> is on an incorrect snapshot.</exception>
         private void MapLineToPixels(ITextSnapshotLine line, out double top, out double bottom)
         {
             double mapTop = _scrollBar.Map.GetCoordinateAtBufferPosition(line.Start) - 0.5;

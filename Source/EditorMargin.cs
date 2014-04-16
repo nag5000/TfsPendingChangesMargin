@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Shapes;
@@ -10,7 +9,6 @@ using Microsoft.TeamFoundation.Diff;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
-using Microsoft.VisualStudio.Text.Outlining;
 
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 {
@@ -46,11 +44,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// The current instance of <see cref="IWpfTextView"/>.
         /// </summary>
         private readonly IWpfTextView _textView;
-
-        /// <summary>
-        /// Provides outlining functionality.
-        /// </summary>
-        private readonly IOutliningManager _outliningManager;
 
         /// <summary>
         /// The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.
@@ -135,9 +128,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Creates a <see cref="EditorMargin"/> for a given <see cref="IWpfTextView"/>.
         /// </summary>
         /// <param name="textView">The <see cref="IWpfTextView"/> to attach the margin to.</param>
-        /// <param name="outliningManagerService">Service that provides the <see cref="IOutliningManager"/>.</param>
         /// <param name="marginCore">The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.</param>
-        public EditorMargin(IWpfTextView textView, IOutliningManagerService outliningManagerService, MarginCore marginCore)
+        public EditorMargin(IWpfTextView textView, MarginCore marginCore)
         {
             Debug.WriteLine("Entering constructor.", MarginName);
 
@@ -148,13 +140,41 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _textView = textView;
             _marginCore = marginCore;
-            _outliningManager = outliningManagerService.GetOutliningManager(textView);
 
             marginCore.MarginRedraw += OnMarginCoreMarginRedraw;
             marginCore.ExceptionThrown += OnMarginCoreExceptionThrown;
 
             if (marginCore.IsActivated)
                 DrawMargins(marginCore.GetChangedLines());
+        }
+
+        /// <summary>
+        /// Checks that the line intersects with one of the changed lines.
+        /// </summary>
+        /// <param name="line">The checked line.</param>
+        /// <param name="changedLines">Collection of the changed lines.</param>
+        /// <returns>Returns <c>true</c>, if the line contains changes.</returns>
+        /// <exception cref="ArgumentException">The supplied <see cref="ITextSnapshotLine"/> is on an incorrect snapshot.</exception>
+        private static bool ContainsChanges(ITextViewLine line, IReadOnlyList<ITextSnapshotLine> changedLines)
+        {
+            int index1 = 0;
+            int num = changedLines.Count;
+            while (index1 < num)
+            {
+                int index2 = (index1 + num) / 2;
+                if ((int)line.Start <= (int)changedLines[index2].End)
+                    num = index2;
+                else
+                    index1 = index2 + 1;
+            }
+
+            if (index1 >= changedLines.Count)
+                return false;
+
+            if ((int)line.EndIncludingLineBreak != line.Snapshot.Length || line.LineBreakLength != 0)
+                return (int)line.EndIncludingLineBreak > (int)changedLines[index1].Start;
+
+            return (int)line.EndIncludingLineBreak >= (int)changedLines[index1].Start;
         }
 
         /// <summary>
@@ -187,14 +207,31 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="e">Event arguments.</param>
         private void OnMarginCoreMarginRedraw(object sender, MarginRedrawEventArgs e)
         {
-            DrawMargins(e.DiffLines);
+            switch (e.Reason)
+            {
+                case MarginDrawReason.InternalReason:
+                case MarginDrawReason.VersionControlItemChanged:
+                case MarginDrawReason.TextViewZoomLevelChanged:
+                case MarginDrawReason.TextDocFileActionOccurred:
+                case MarginDrawReason.TextViewTextChanged:
+                case MarginDrawReason.TextViewLayoutChanged:
+                case MarginDrawReason.EditorFormatMapChanged:
+                    DrawMargins(e.DiffLines);
+                    break;
+
+                case MarginDrawReason.ScrollMapMappingChanged:
+                    return;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
         }
 
         /// <summary>
         /// Draw margins for each diff line.
         /// </summary>
         /// <param name="diffLines">Differences between the current document and the version in TFS.</param>
-        private void DrawMargins(IDictionary<ITextSnapshotLine, DiffChangeType> diffLines)
+        private void DrawMargins(DiffLinesCollection diffLines)
         {
             if (!Dispatcher.CheckAccess())
             {
@@ -202,73 +239,42 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 return;
             }
 
-            Debug.Assert(_textView != null, "_textView is null.");
-            Debug.Assert(_outliningManager != null, "_outliningManager is null.");
-
             Children.Clear();
 
-            var rectMap = new Dictionary<double, KeyValuePair<DiffChangeType, Rectangle>>();
-            foreach (KeyValuePair<ITextSnapshotLine, DiffChangeType> diffLine in diffLines)
+            foreach (ITextViewLine viewLine in _textView.TextViewLines)
             {
-                ITextSnapshotLine line = diffLine.Key;
-                DiffChangeType diffType = diffLine.Value;
-
-                IWpfTextViewLine viewLine;
+                DiffChangeType diffType;
 
                 try
                 {
-                    viewLine = _textView.GetTextViewLineContainingBufferPosition(line.Start);
-                    Debug.Assert(viewLine != null, "viewLine is null.");
-                }
-                catch (InvalidOperationException)
-                {
-                    if (_textView.IsClosed)
-                        return;
-
-                    throw;
+                    if (ContainsChanges(viewLine, diffLines[DiffChangeType.Change]))
+                    {
+                        diffType = DiffChangeType.Change;
+                    }
+                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Insert]))
+                    {
+                        diffType = DiffChangeType.Insert;
+                        if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete]))
+                            diffType = DiffChangeType.Change;
+                    }
+                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete]))
+                    {
+                        diffType = DiffChangeType.Delete;
+                    }
+                    else
+                    {
+                        continue;
+                    }
                 }
                 catch (ArgumentException)
                 {
-                    // The supplied SnapshotPoint is on an incorrect snapshot (old version).
+                    // The supplied line is on an incorrect snapshot (old version).
                     return;
-                }
-
-                switch (viewLine.VisibilityState)
-                {
-                    case VisibilityState.Unattached:
-                    case VisibilityState.Hidden:
-                        continue;
-
-                    case VisibilityState.PartiallyVisible:
-                    case VisibilityState.FullyVisible:
-                        break;
-
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-
-                if (rectMap.ContainsKey(viewLine.Top))
-                {
-                    #if DEBUG
-                    IEnumerable<ICollapsed> collapsedRegions = _outliningManager.GetCollapsedRegions(viewLine.Extent, true);
-                    bool lineIsCollapsed = collapsedRegions.Any();
-                    Debug.Assert(lineIsCollapsed, "line should be collapsed.");
-                    #endif
-
-                    KeyValuePair<DiffChangeType, Rectangle> rectMapValue = rectMap[viewLine.Top];
-                    if (rectMapValue.Key != DiffChangeType.Change && rectMapValue.Key != diffType)
-                    {
-                        rectMapValue.Value.Fill = _marginCore.MarginSettings.ModifiedLineMarginBrush;
-                        rectMap[viewLine.Top] = new KeyValuePair<DiffChangeType, Rectangle>(DiffChangeType.Change, rectMapValue.Value);
-                    }
-
-                    continue;
                 }
 
                 var rect = new Rectangle { Height = viewLine.Height, Width = MarginElementWidth };
                 SetLeft(rect, MarginElementLeft);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
-                rectMap.Add(viewLine.Top, new KeyValuePair<DiffChangeType, Rectangle>(diffType, rect));
 
                 switch (diffType)
                 {
