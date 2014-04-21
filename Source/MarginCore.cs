@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -63,9 +64,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly IScrollMap _scrollMap;
 
         /// <summary>
-        /// Lock-object used to synchronize <see cref="GetDifference"/> method.
+        /// Lock-object used to synchronize reading the <see cref="_versionControlItemStream"/>.
         /// </summary>
-        private readonly object _differenceLockObject = new object();
+        private readonly object _versionControlItemStreamLockObject = new object();
 
         /// <summary>
         /// Lock-object used to synchronize the margin drawing.
@@ -216,6 +217,41 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Get a committed text from the specified range.
+        /// </summary>
+        /// <param name="startLine">Start line number. Inclusive upper bound.</param>
+        /// <param name="endLine">End line number. Inclusive lower bound.</param>
+        /// <returns>Original text from the specified range.</returns>
+        public string GetOriginalText(int startLine, int endLine)
+        {
+            IEnumerable<string> lines;
+            lock (_versionControlItemStreamLockObject)
+            {
+                var encoding = Encoding.GetEncoding(_versionControlItem.Encoding);
+                lines = ReadLines(_versionControlItemStream, encoding).Skip(startLine).Take(endLine - startLine + 1);
+            }
+
+            return string.Join(Environment.NewLine, lines);
+        }
+
+        /// <summary>
+        /// Reading stream by lines.
+        /// </summary>
+        /// <param name="stream">Readable stream.</param>
+        /// <param name="encoding">Stream encoding.</param>
+        /// <returns>Enumeration of text lines of the stream.</returns>
+        private static IEnumerable<string> ReadLines(Stream stream, Encoding encoding)
+        {
+            stream.Position = 0;
+            using (var reader = new StreamReader(stream, encoding, false, 1024, true))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                    yield return line;
+            }
+        }
+
+        /// <summary>
         /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
         /// And as a result, changes are calculated incorrectly. 
         /// This method is called for both compared streams before comparing and adds a nonblank line to them.
@@ -252,10 +288,10 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="collection">Collection of differences between the current document and the version in TFS.</param>
         /// <param name="textSnapshot">The text snapshot.</param>
         /// <param name="lineNumber">The line number.</param>
-        /// <param name="lineDiffType">Difference type of the line.</param>
-        private static void AddLineToDiffLinesCollection(DiffLinesCollection collection, ITextSnapshot textSnapshot, int lineNumber, DiffChangeType lineDiffType)
+        /// <param name="diffChangeInfo">Represents information about a specific difference between two sequences.</param>
+        private static void AddLineToDiffLinesCollection(DiffLinesCollection collection, ITextSnapshot textSnapshot, int lineNumber, IDiffChange diffChangeInfo)
         {
-            if (lineNumber == -1 && lineDiffType == DiffChangeType.Delete)
+            if (lineNumber == -1 && diffChangeInfo.ChangeType == DiffChangeType.Delete)
                 lineNumber = 0;
 
             ITextSnapshotLine line;
@@ -269,7 +305,36 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 throw new ArgumentOutOfRangeException(msg, ex);
             }
 
-            collection[lineDiffType].Add(line);
+            collection.Add(line, diffChangeInfo);
+        }
+
+        /// <summary>
+        /// Get differences between an original stream and a modified stream.
+        /// </summary>
+        /// <param name="originalStream">Original stream.</param>
+        /// <param name="originalEncoding">Encoding of original stream.</param>
+        /// <param name="modifiedStream">Modified stream.</param>
+        /// <param name="modifiedEncoding">Encoding of modified stream.</param>
+        /// <returns>A summary of the differences between two streams.</returns>
+        private static DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
+        {
+            var diffOptions = new DiffOptions { UseThirdPartyTool = false };
+
+            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
+            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
+
+            originalStream.Position = 0;
+            modifiedStream.Position = 0;
+
+            DiffSummary diffSummary = DiffUtil.Diff(
+                originalStream,
+                originalEncoding,
+                modifiedStream,
+                modifiedEncoding,
+                diffOptions,
+                true);
+
+            return diffSummary;
         }
 
         /// <summary>
@@ -474,9 +539,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         private void DownloadVersionControlItem()
         {
-            _versionControlItemStream = new MemoryStream();
-            _versionControlItem.DownloadFile().CopyTo(_versionControlItemStream);
-            AppendShiftTokenToStream(_versionControlItemStream, Encoding.GetEncoding(_versionControlItem.Encoding));
+            var stream = new MemoryStream();
+            _versionControlItem.DownloadFile().CopyTo(stream);
+            AppendShiftTokenToStream(stream, Encoding.GetEncoding(_versionControlItem.Encoding));
+
+            _versionControlItemStream = stream;
         }
 
         /// <summary>
@@ -531,40 +598,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// Get differences between an original stream and a modified stream.
-        /// </summary>
-        /// <param name="originalStream">Original stream.</param>
-        /// <param name="originalEncoding">Encoding of original stream.</param>
-        /// <param name="modifiedStream">Modified stream.</param>
-        /// <param name="modifiedEncoding">Encoding of modified stream.</param>
-        /// <returns>A summary of the differences between two streams.</returns>
-        private DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
-        {
-            var diffOptions = new DiffOptions { UseThirdPartyTool = false };
-
-            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
-            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
-
-            DiffSummary diffSummary;
-
-            lock (_differenceLockObject)
-            {
-                originalStream.Position = 0;
-                modifiedStream.Position = 0;
-
-                diffSummary = DiffUtil.Diff(
-                    originalStream,
-                    originalEncoding,
-                    modifiedStream,
-                    modifiedEncoding,
-                    diffOptions,
-                    true);
-            }
-
-            return diffSummary;
-        }
-
-        /// <summary>
         /// Get differences between the document's local file and his source control version.
         /// </summary>
         /// <returns>
@@ -584,52 +617,53 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             sourceStream.Write(textBytes, 0, textBytes.Length);
             AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
 
-            DiffSummary diffSummary = GetDifference(
-                _versionControlItemStream,
-                Encoding.GetEncoding(_versionControlItem.Encoding),
-                sourceStream,
-                sourceStreamEncoding);
+            DiffSummary diffSummary;
+            lock (_versionControlItemStreamLockObject)
+            {
+                diffSummary = GetDifference(
+                    _versionControlItemStream,
+                    Encoding.GetEncoding(_versionControlItem.Encoding),
+                    sourceStream,
+                    sourceStreamEncoding);
+            }
 
             var dict = new DiffLinesCollection();
             for (int i = 0; i < diffSummary.Changes.Length; i++)
             {
-                IDiffChange diffChange = diffSummary.Changes[i];
-                int diffStartLineIndex = diffChange.ModifiedStart;
-                int diffEndLineIndex = diffChange.ModifiedEnd - 1;
+                var diff = new DiffChange(diffSummary.Changes[i]);
 
-                DiffChangeType diffType = diffChange.ChangeType;
-                if (diffType == DiffChangeType.Change)
+                if (diff.ChangeType == DiffChangeType.Change)
                 {
-                    if (diffChange.OriginalLength >= diffChange.ModifiedLength)
+                    if (diff.OriginalLength >= diff.ModifiedLength)
                     {
-                        int linesModified = diffChange.ModifiedLength;
+                        int linesModified = diff.ModifiedLength;
                         if (linesModified == 0)
                         {
-                            diffType = DiffChangeType.Delete;
-                            int linesDeleted = diffChange.OriginalLength - diffChange.ModifiedLength;
+                            diff.ChangeType = DiffChangeType.Delete;
+                            int linesDeleted = diff.OriginalLength - diff.ModifiedLength;
                             Debug.Assert(linesDeleted > 0, "linesDeleted must be greater than zero.");
                         }
                     }
                     else
                     {
-                        int linesModified = diffChange.OriginalLength;
+                        int linesModified = diff.OriginalLength;
                         if (linesModified == 0)
                         {
-                            diffType = DiffChangeType.Insert;
-                            int linesAdded = diffChange.ModifiedLength - diffChange.OriginalLength;
+                            diff.ChangeType = DiffChangeType.Insert;
+                            int linesAdded = diff.ModifiedLength - diff.OriginalLength;
                             Debug.Assert(linesAdded > 0, "linesAdded must be greater than zero.");
                         }
                     }
                 }
 
-                if (diffType != DiffChangeType.Delete)
+                if (diff.ChangeType != DiffChangeType.Delete)
                 {
-                    for (int k = diffStartLineIndex; k <= diffEndLineIndex; k++)
-                        AddLineToDiffLinesCollection(dict, textSnapshot, k, diffType);
+                    for (int k = diff.ModifiedStart; k <= diff.ModifiedEnd; k++)
+                        AddLineToDiffLinesCollection(dict, textSnapshot, k, diff);
                 }
                 else
                 {
-                    AddLineToDiffLinesCollection(dict, textSnapshot, diffEndLineIndex, diffType);
+                    AddLineToDiffLinesCollection(dict, textSnapshot, diff.ModifiedEnd, diff);
                 }
             }
 

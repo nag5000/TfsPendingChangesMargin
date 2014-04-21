@@ -153,28 +153,38 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <param name="line">The checked line.</param>
         /// <param name="changedLines">Collection of the changed lines.</param>
+        /// <param name="intersectedLine">A line from the <see cref="changedLines"/> which was intersected with the <see cref="line"/>.</param>
         /// <returns>Returns <c>true</c>, if the line contains changes.</returns>
         /// <exception cref="ArgumentException">The supplied <see cref="ITextSnapshotLine"/> is on an incorrect snapshot.</exception>
-        private static bool ContainsChanges(ITextViewLine line, IReadOnlyList<ITextSnapshotLine> changedLines)
+        private static bool ContainsChanges(ITextViewLine line, IReadOnlyList<ITextSnapshotLine> changedLines, out ITextSnapshotLine intersectedLine)
         {
-            int index1 = 0;
-            int num = changedLines.Count;
-            while (index1 < num)
+            int changedLineIndex = 0;
+            int changedLinesCount = changedLines.Count;
+            while (changedLineIndex < changedLinesCount)
             {
-                int index2 = (index1 + num) / 2;
-                if ((int)line.Start <= (int)changedLines[index2].End)
-                    num = index2;
+                int index = (changedLineIndex + changedLinesCount) / 2;
+                if ((int)line.Start <= (int)changedLines[index].End)
+                    changedLinesCount = index;
                 else
-                    index1 = index2 + 1;
+                    changedLineIndex = index + 1;
             }
 
-            if (index1 >= changedLines.Count)
+            if (changedLineIndex >= changedLines.Count)
+            {
+                intersectedLine = null;
                 return false;
+            }
+
+            bool containsChanges;
+            var checkedIntersectedLine = changedLines[changedLineIndex];
 
             if ((int)line.EndIncludingLineBreak != line.Snapshot.Length || line.LineBreakLength != 0)
-                return (int)line.EndIncludingLineBreak > (int)changedLines[index1].Start;
+                containsChanges = (int)line.EndIncludingLineBreak > (int)checkedIntersectedLine.Start;
+            else
+                containsChanges = (int)line.EndIncludingLineBreak >= (int)checkedIntersectedLine.Start;
 
-            return (int)line.EndIncludingLineBreak >= (int)changedLines[index1].Start;
+            intersectedLine = containsChanges ? checkedIntersectedLine : null;
+            return containsChanges;
         }
 
         /// <summary>
@@ -244,20 +254,26 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             foreach (ITextViewLine viewLine in _textView.TextViewLines)
             {
                 DiffChangeType diffType;
-
+                ITextSnapshotLine line;
+                
                 try
                 {
-                    if (ContainsChanges(viewLine, diffLines[DiffChangeType.Change]))
+                    if (ContainsChanges(viewLine, diffLines[DiffChangeType.Change], out line))
                     {
                         diffType = DiffChangeType.Change;
                     }
-                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Insert]))
+                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Insert], out line))
                     {
                         diffType = DiffChangeType.Insert;
-                        if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete]))
+
+                        ITextSnapshotLine tmp;
+                        if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete], out tmp))
+                        {
                             diffType = DiffChangeType.Change;
+                            line = tmp;
+                        }
                     }
-                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete]))
+                    else if (ContainsChanges(viewLine, diffLines[DiffChangeType.Delete], out line))
                     {
                         diffType = DiffChangeType.Delete;
                     }
@@ -271,6 +287,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     // The supplied line is on an incorrect snapshot (old version).
                     return;
                 }
+
+                IDiffChange diffChangeInfo = diffLines[line];
 
                 var rect = new Rectangle { Height = viewLine.Height, Width = MarginElementWidth };
                 SetLeft(rect, MarginElementLeft);
@@ -289,6 +307,22 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                         break;
                     default:
                         throw new ArgumentOutOfRangeException();
+                }
+
+                if (diffType != DiffChangeType.Insert)
+                {
+                    rect.MouseEnter += (sender, args) =>
+                    {
+                        if (rect.ToolTip == null)
+                        {
+                            ToolTipService.SetShowDuration(rect, 3600000);
+                            string text = _marginCore.GetOriginalText(diffChangeInfo.OriginalStart, diffChangeInfo.OriginalEnd);
+                            rect.ToolTip = text;
+
+                            // TODO: Если регион свернут, то тултип будет только для первого изменения в нем, т.к. ContainsChanges возвращает первую пересекаемую строку. 
+                            // Все пересекаемые строки не учитываются. Нужно добавить поддержку всех пересекаемых строк, но только для показа тултипа, чтобы не замедлять рендеринг.
+                        }
+                    };
                 }
 
                 Children.Add(rect);

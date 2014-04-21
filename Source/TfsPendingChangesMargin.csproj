@@ -68,6 +68,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DiffChange.cs" />
     <Compile Include="DiffLineEntry.cs" />
     <Compile Include="DiffLinesCollection.cs" />
     <Compile Include="MarginCoreFactory.cs" />

@@ -18,6 +18,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly Dictionary<DiffChangeType, List<ITextSnapshotLine>> _dict;
 
         /// <summary>
+        /// Collection which linking the changed line with change information.
+        /// </summary>
+        private readonly Dictionary<ITextSnapshotLine, IDiffChange> _diffDict;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="DiffLinesCollection"/> class.
         /// </summary>
         public DiffLinesCollection()
@@ -25,6 +30,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             _dict = new Dictionary<DiffChangeType, List<ITextSnapshotLine>>();
             foreach (DiffChangeType diffChangeType in Enum.GetValues(typeof(DiffChangeType)))
                 _dict.Add(diffChangeType, new List<ITextSnapshotLine>());
+
+            _diffDict = new Dictionary<ITextSnapshotLine, IDiffChange>();
         }
 
         /// <summary>
@@ -32,9 +39,30 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <param name="diffChangeType">Type of differences.</param>
         /// <returns>Collection of differences with the specified type.</returns>
-        public List<ITextSnapshotLine> this[DiffChangeType diffChangeType]
+        public IReadOnlyList<ITextSnapshotLine> this[DiffChangeType diffChangeType]
         {
             get { return _dict[diffChangeType]; }
+        }
+
+        /// <summary>
+        /// Gets information about the difference of line in the collection.
+        /// </summary>
+        /// <param name="line">A line of text from an <see cref="ITextSnapshot"/> in the collection.</param>
+        /// <returns>Information about the difference of line.</returns>
+        public IDiffChange this[ITextSnapshotLine line]
+        {
+            get { return _diffDict[line]; }
+        }
+
+        /// <summary>
+        /// Add the changed line in the collection.
+        /// </summary>
+        /// <param name="line">A line of text from an <see cref="ITextSnapshot"/>.</param>
+        /// <param name="diffChangeInfo">Information about the difference of line.</param>
+        public void Add(ITextSnapshotLine line, IDiffChange diffChangeInfo)
+        {
+            _dict[diffChangeInfo.ChangeType].Add(line);
+            _diffDict[line] = diffChangeInfo;
         }
 
         /// <summary>
@@ -44,6 +72,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             foreach (List<ITextSnapshotLine> linesList in _dict.Values)
                 linesList.Clear();
+
+            _diffDict.Clear();
         }
 
         /// <summary>
