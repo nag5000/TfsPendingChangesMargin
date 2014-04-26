@@ -17,11 +17,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             ChangeType = diffChange.ChangeType;
 
             OriginalStart = diffChange.OriginalStart;
-            OriginalEnd = diffChange.OriginalEnd - 1; // exclusive bound to inclusive.
+            OriginalEnd = Math.Max(0, diffChange.OriginalEnd - 1); // exclusive bound to inclusive.
             OriginalLength = diffChange.OriginalLength;
 
             ModifiedStart = diffChange.ModifiedStart;
-            ModifiedEnd = diffChange.ModifiedEnd - 1; // exclusive bound to inclusive.
+            ModifiedEnd = Math.Max(0, diffChange.ModifiedEnd - 1); // exclusive bound to inclusive.
             ModifiedLength = diffChange.ModifiedLength;
         }
 

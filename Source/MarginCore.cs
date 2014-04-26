@@ -291,9 +291,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="diffChangeInfo">Represents information about a specific difference between two sequences.</param>
         private static void AddLineToDiffLinesCollection(DiffLinesCollection collection, ITextSnapshot textSnapshot, int lineNumber, IDiffChange diffChangeInfo)
         {
-            if (lineNumber == -1 && diffChangeInfo.ChangeType == DiffChangeType.Delete)
-                lineNumber = 0;
-
             ITextSnapshotLine line;
             try
             {
