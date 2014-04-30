@@ -145,6 +145,22 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Gets the <see cref="ITextDocument"/> which is associated with current instance of <see cref="IWpfTextView"/>. 
+        /// </summary>
+        public ITextDocument TextDocument
+        {
+            get { return _textDoc; }
+        }
+
+        /// <summary>
+        /// Gets the committed version of the <see cref="TextDocument"/> in the version control server. 
+        /// </summary>
+        public Item VersionControlItem
+        {
+            get { return _versionControlItem; }
+        }
+
+        /// <summary>
         /// Gets cached differences between the current document and the version in TFS.
         /// </summary>
         /// <returns>
@@ -217,12 +233,27 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Get a committed text from the original sequence of the <see cref="IDiffChange"/>.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        /// <param name="removeLastLineTerminator">Remove line terminator for the last line of the returned text, if line terminator is present.</param>
+        /// <returns>Original text from the <see cref="IDiffChange"/>.</returns>
+        public string GetOriginalText(IDiffChange diffChange, bool removeLastLineTerminator)
+        {
+            if (diffChange.ChangeType == DiffChangeType.Insert)
+                return string.Empty;
+
+            return GetOriginalText(diffChange.OriginalStart, diffChange.OriginalEnd, removeLastLineTerminator);
+        }
+
+        /// <summary>
         /// Get a committed text from the specified range.
         /// </summary>
         /// <param name="startLine">Start line number. Inclusive upper bound.</param>
         /// <param name="endLine">End line number. Inclusive lower bound.</param>
+        /// <param name="removeLastLineTerminator">Remove line terminator for the last line of the returned text, if line terminator is present.</param>
         /// <returns>Original text from the specified range.</returns>
-        public string GetOriginalText(int startLine, int endLine)
+        public string GetOriginalText(int startLine, int endLine, bool removeLastLineTerminator)
         {
             IEnumerable<string> lines;
             lock (_versionControlItemStreamLockObject)
@@ -231,7 +262,48 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 lines = ReadLines(_versionControlItemStream, encoding).Skip(startLine).Take(endLine - startLine + 1);
             }
 
-            return string.Join(Environment.NewLine, lines);
+            string text = string.Join(string.Empty, lines);
+            if (removeLastLineTerminator)
+            {
+                if (text.EndsWith("\r\n")) // Windows line terminator (CRLF)
+                    text = text.Remove(text.Length - 2);
+                else if (text.EndsWith("\n")) // Unix line terminator (LF only)
+                    text = text.Remove(text.Length - 1);
+            }
+
+            return text;
+        }
+
+        /// <summary>
+        /// Get a local text from the modified sequence of the <see cref="IDiffChange"/>.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        /// <param name="removeLastLineTerminator">Remove line terminator for the last line of the returned text, if line terminator is present.</param>
+        /// <returns>Modified text from the <see cref="IDiffChange"/>.</returns>
+        public string GetModifiedText(IDiffChange diffChange, bool removeLastLineTerminator)
+        {
+            if (diffChange.ChangeType == DiffChangeType.Delete)
+                return string.Empty;
+
+            return GetModifiedText(diffChange.ModifiedStart, diffChange.ModifiedEnd, removeLastLineTerminator);
+        }
+
+        /// <summary>
+        /// Get a local text from the specified range.
+        /// </summary>
+        /// <param name="startLine">Start line number. Inclusive upper bound.</param>
+        /// <param name="endLine">End line number. Inclusive lower bound.</param>
+        /// <param name="removeLastLineTerminator">Remove line terminator for the last line of the returned text, if line terminator is present.</param>
+        /// <returns>Modified text from the specified range.</returns>
+        public string GetModifiedText(int startLine, int endLine, bool removeLastLineTerminator)
+        {
+            ITextSnapshot textSnapshot = _textView.TextSnapshot;
+            ITextSnapshotLine startTextLine = textSnapshot.GetLineFromLineNumber(startLine);
+            ITextSnapshotLine endTextLine = textSnapshot.GetLineFromLineNumber(endLine);
+            int start = startTextLine.Start.Position;
+            int length = (removeLastLineTerminator ? endTextLine.End.Position : endTextLine.EndIncludingLineBreak.Position) - start;
+            string text = textSnapshot.GetText(start, length);
+            return text;
         }
 
         /// <summary>
@@ -239,7 +311,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         /// <param name="stream">Readable stream.</param>
         /// <param name="encoding">Stream encoding.</param>
-        /// <returns>Enumeration of text lines of the stream.</returns>
+        /// <returns>Enumeration of text lines with line terminators (except the last line at the EOF).</returns>
         private static IEnumerable<string> ReadLines(Stream stream, Encoding encoding)
         {
             stream.Position = 0;
@@ -247,7 +319,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             {
                 string line;
                 while ((line = reader.ReadLine()) != null)
-                    yield return line;
+                {
+                    if (reader.EndOfStream)
+                        yield return line;
+                    else
+                        yield return line + Environment.NewLine; // TODO: keep the original whitespace verbatim.
+                }
             }
         }
 

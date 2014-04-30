@@ -1,9 +1,7 @@
 ﻿using System.ComponentModel.Composition;
 
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Classification;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Operations;
 using Microsoft.VisualStudio.Utilities;
 
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin
@@ -21,6 +19,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
     internal sealed class EditorMarginFactory : MarginCoreFactory
     {
         /// <summary>
+        /// Maintains the relationship between text buffers and <see cref="ITextUndoHistory"/> objects.
+        /// </summary>
+        [Import]
+        internal ITextUndoHistoryRegistry UndoHistoryRegistry;
+
+        /// <summary>
         /// Creates an <see cref="IWpfTextViewMargin"/> for the given <see cref="IWpfTextViewHost"/>.
         /// </summary>
         /// <param name="textViewHost">The <see cref="IWpfTextViewHost"/> for which to create the <see cref="IWpfTextViewMargin"/>.</param>
@@ -29,7 +33,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         public override IWpfTextViewMargin CreateMargin(IWpfTextViewHost textViewHost, IWpfTextViewMargin marginContainer)
         {
             var marginCore = GetMarginCore(textViewHost);
-            return new EditorMargin(textViewHost.TextView, marginCore);
+            return new EditorMargin(textViewHost.TextView, UndoHistoryRegistry, marginCore);
         }
     }
 }

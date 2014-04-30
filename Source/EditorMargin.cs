@@ -1,14 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Shapes;
 
 using Microsoft.TeamFoundation.Diff;
+using Microsoft.TeamFoundation.VersionControl.Client;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
+using Microsoft.VisualStudio.Text.Operations;
 
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 {
@@ -51,9 +55,19 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         private readonly MarginCore _marginCore;
 
         /// <summary>
+        /// Contains undo transactions.
+        /// </summary>
+        private readonly ITextUndoHistory _undoHistory;
+
+        /// <summary>
         /// The margin has been disposed of.
         /// </summary>
         private bool _isDisposed;
+
+        /// <summary>
+        /// Context menu for the margin element.
+        /// </summary>
+        private ContextMenu _contextMenu;
 
         #endregion Fields
 
@@ -128,8 +142,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// Creates a <see cref="EditorMargin"/> for a given <see cref="IWpfTextView"/>.
         /// </summary>
         /// <param name="textView">The <see cref="IWpfTextView"/> to attach the margin to.</param>
+        /// <param name="undoHistoryRegistry">Maintains the relationship between text buffers and <see cref="ITextUndoHistory"/> objects.</param>
         /// <param name="marginCore">The class which receives, processes and provides necessary data for <see cref="EditorMargin"/>.</param>
-        public EditorMargin(IWpfTextView textView, MarginCore marginCore)
+        public EditorMargin(IWpfTextView textView, ITextUndoHistoryRegistry undoHistoryRegistry, MarginCore marginCore)
         {
             Debug.WriteLine("Entering constructor.", MarginName);
 
@@ -140,6 +155,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _textView = textView;
             _marginCore = marginCore;
+
+            undoHistoryRegistry.TryGetHistory(textView.TextBuffer, out _undoHistory);
 
             marginCore.MarginRedraw += OnMarginCoreMarginRedraw;
             marginCore.ExceptionThrown += OnMarginCoreExceptionThrown;
@@ -163,7 +180,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             while (changedLineIndex < changedLinesCount)
             {
                 int index = (changedLineIndex + changedLinesCount) / 2;
-                if ((int)line.Start <= (int)changedLines[index].End)
+                if (line.Start.Position <= changedLines[index].End.Position)
                     changedLinesCount = index;
                 else
                     changedLineIndex = index + 1;
@@ -178,10 +195,10 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             bool containsChanges;
             var checkedIntersectedLine = changedLines[changedLineIndex];
 
-            if ((int)line.EndIncludingLineBreak != line.Snapshot.Length || line.LineBreakLength != 0)
-                containsChanges = (int)line.EndIncludingLineBreak > (int)checkedIntersectedLine.Start;
+            if (line.EndIncludingLineBreak.Position != line.Snapshot.Length || line.LineBreakLength != 0)
+                containsChanges = line.EndIncludingLineBreak.Position > checkedIntersectedLine.Start.Position;
             else
-                containsChanges = (int)line.EndIncludingLineBreak >= (int)checkedIntersectedLine.Start;
+                containsChanges = line.EndIncludingLineBreak.Position >= checkedIntersectedLine.Start.Position;
 
             intersectedLine = containsChanges ? checkedIntersectedLine : null;
             return containsChanges;
@@ -194,6 +211,20 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             Width = MarginElementWidth + MarginRightIndent;
             ClipToBounds = true;
+
+            _contextMenu = new ContextMenu();
+
+            var copyMenuItem = new MenuItem { Header = "Copy commited text" };
+            copyMenuItem.Click += CopyCommitedTextMenuItemOnClick;
+            _contextMenu.Items.Add(copyMenuItem);
+
+            var rollbackChangeMenuItem = new MenuItem { Header = "Rollback modified text" };
+            rollbackChangeMenuItem.Click += RollbackChangeMenuItemOnClick;
+            _contextMenu.Items.Add(rollbackChangeMenuItem);
+
+            var compareChangeRegionMenuItem = new MenuItem { Header = "Compare region with diff tool" };
+            compareChangeRegionMenuItem.Click += CompareChangeRegionMenuItemOnClick;
+            _contextMenu.Items.Add(compareChangeRegionMenuItem);
         }
 
         /// <summary>
@@ -290,7 +321,14 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
                 IDiffChange diffChangeInfo = diffLines[line];
 
-                var rect = new Rectangle { Height = viewLine.Height, Width = MarginElementWidth };
+                var rect = new Rectangle
+                {
+                    Height = viewLine.Height, 
+                    Width = MarginElementWidth,
+                    Cursor = Cursors.Hand,
+                    ContextMenu = _contextMenu,
+                    Tag = new { DiffChangeInfo = diffChangeInfo, Line = line }
+                };
                 SetLeft(rect, MarginElementLeft);
                 SetTop(rect, viewLine.Top - _textView.ViewportTop);
 
@@ -310,23 +348,258 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 }
 
                 if (diffType != DiffChangeType.Insert)
-                {
-                    rect.MouseEnter += (sender, args) =>
-                    {
-                        if (rect.ToolTip == null)
-                        {
-                            ToolTipService.SetShowDuration(rect, 3600000);
-                            string text = _marginCore.GetOriginalText(diffChangeInfo.OriginalStart, diffChangeInfo.OriginalEnd);
-                            rect.ToolTip = text;
+                    rect.MouseEnter += OnMarginElementMouseEnter;
 
-                            // TODO: Если регион свернут, то тултип будет только для первого изменения в нем, т.к. ContainsChanges возвращает первую пересекаемую строку. 
-                            // Все пересекаемые строки не учитываются. Нужно добавить поддержку всех пересекаемых строк, но только для показа тултипа, чтобы не замедлять рендеринг.
-                        }
-                    };
-                }
+                rect.MouseLeftButtonDown += OnMarginElementMouseLeftButtonDown;
+                rect.MouseLeftButtonUp += OnMarginElementMouseLeftButtonUp;
 
                 Children.Add(rect);
             }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when "Copy commited text" menu item is clicked.
+        /// </summary>
+        /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
+        /// <param name="routedEventArgs">Event arguments.</param>
+        private void CopyCommitedTextMenuItemOnClick(object sender, RoutedEventArgs routedEventArgs)
+        {
+            try
+            {
+                var marginElement = (FrameworkElement)_contextMenu.PlacementTarget;
+                dynamic data = marginElement.Tag;
+                IDiffChange diffChange = data.DiffChangeInfo;
+
+                CopyCommitedText(diffChange);
+
+                routedEventArgs.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                ShowException(ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when "Rollback modified text" menu item is clicked.
+        /// </summary>
+        /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
+        /// <param name="routedEventArgs">Event arguments.</param>
+        private void RollbackChangeMenuItemOnClick(object sender, RoutedEventArgs routedEventArgs)
+        {
+            try
+            {
+                var marginElement = (FrameworkElement)_contextMenu.PlacementTarget;
+                dynamic data = marginElement.Tag;
+                IDiffChange diffChange = data.DiffChangeInfo;
+
+                RollbackChange(diffChange);
+
+                routedEventArgs.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                ShowException(ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when "Compare region with diff tool" menu item is clicked.
+        /// </summary>
+        /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
+        /// <param name="routedEventArgs">Event arguments.</param>
+        private void CompareChangeRegionMenuItemOnClick(object sender, RoutedEventArgs routedEventArgs)
+        {
+            try
+            {
+                var marginElement = (FrameworkElement)_contextMenu.PlacementTarget;
+                dynamic data = marginElement.Tag;
+                IDiffChange diffChange = data.DiffChangeInfo;
+
+                CompareChangeRegion(diffChange);
+
+                routedEventArgs.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                ShowException(ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the mouse pointer enters the bounds of the margin element. 
+        /// </summary>
+        /// <param name="sender">Event sender (the margin element).</param>
+        /// <param name="args">Event arguments.</param>
+        private void OnMarginElementMouseEnter(object sender, MouseEventArgs args)
+        {
+            var marginElement = (FrameworkElement)sender;
+            dynamic data = marginElement.Tag;
+            IDiffChange diffChange = data.DiffChangeInfo;
+
+            if (marginElement.ToolTip == null)
+            {
+                ToolTipService.SetShowDuration(marginElement, 3600000);
+                string text = _marginCore.GetOriginalText(diffChange, true);
+                marginElement.ToolTip = text;
+
+                // TODO: Если регион свернут, то тултип будет только для первого изменения в нем, т.к. ContainsChanges возвращает первую пересекаемую строку. 
+                // Все пересекаемые строки не учитываются. Нужно добавить поддержку всех пересекаемых строк, но только для показа тултипа, чтобы не замедлять рендеринг.
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the left mouse button is pressed while the mouse pointer is over the margin element. 
+        /// </summary>
+        /// <param name="sender">Event sender (the margin element).</param>
+        /// <param name="args">Event arguments.</param>
+        private void OnMarginElementMouseLeftButtonDown(object sender, MouseButtonEventArgs args)
+        {
+            args.Handled = true;
+        }
+
+        /// <summary>
+        /// Event handler that occurs when the left mouse button is released while the mouse pointer is over the margin element. 
+        /// </summary>
+        /// <param name="sender">Event sender (the margin element).</param>
+        /// <param name="args">Event arguments.</param>
+        private void OnMarginElementMouseLeftButtonUp(object sender, MouseButtonEventArgs args)
+        {
+            _contextMenu.PlacementTarget = (UIElement)sender;
+            _contextMenu.IsOpen = true;
+            args.Handled = true;
+        }
+
+        /// <summary>
+        /// Copy commited text to the Clipboard.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        private void CopyCommitedText(IDiffChange diffChange)
+        {
+            string text = _marginCore.GetOriginalText(diffChange, true);
+            Clipboard.SetText(text, TextDataFormat.UnicodeText);
+        }
+
+        /// <summary>
+        /// Rollback modified text.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        private void RollbackChange(IDiffChange diffChange)
+        {
+            ITextEdit edit = _textView.TextBuffer.CreateEdit();
+
+            try
+            {
+                ITextSnapshot snapshot = edit.Snapshot;
+                ITextSnapshotLine startLine = snapshot.GetLineFromLineNumber(diffChange.ModifiedStart);
+
+                if (diffChange.ChangeType != DiffChangeType.Delete)
+                {
+                    ITextSnapshotLine endLine = snapshot.GetLineFromLineNumber(diffChange.ModifiedEnd);
+
+                    int start = startLine.Start.Position;
+                    int length = endLine.EndIncludingLineBreak.Position - start;
+                    edit.Delete(new Span(start, length));
+                }
+
+                if (diffChange.ChangeType != DiffChangeType.Insert)
+                {
+                    string text = _marginCore.GetOriginalText(diffChange, false);
+                    edit.Insert(startLine.Start.Position, text);
+                }
+
+                if (_undoHistory != null)
+                {
+                    using (ITextUndoTransaction transaction = _undoHistory.CreateTransaction("Rollback modified text"))
+                    {
+                        edit.Apply();
+                        transaction.Complete();
+                    }
+                }
+                else
+                {
+                    edit.Apply();
+                }
+            }
+            catch (Exception)
+            {
+                edit.Cancel();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Visual compare <see cref="IDiffChange"/> with the Visual Studio Diff Tool.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        private void CompareChangeRegion(IDiffChange diffChange)
+        {
+            const string SourceFileTag = "Server";
+            const string TargetFileTag = "Local";
+
+            const bool IsSourceReadOnly = true;
+            const bool IsTargetReadOnly = true;
+
+            const bool DeleteSourceOnExit = true;
+            const bool DeleteTargetOnExit = true;
+
+            const string FileLabelTemplateSingleLine = "{0};{1}[line {2}]";
+            const string FileLabelTemplateBetweenLines = "{0};{1}[between lines {3}-{2}]";
+            const string FileLabelTemplateLinesRange = "{0};{1}[lines {2}-{3}]";
+
+            string sourceFileLabelTemplate;
+            if (diffChange.OriginalStart == diffChange.OriginalEnd)
+                sourceFileLabelTemplate = FileLabelTemplateSingleLine;
+            else if (diffChange.ChangeType == DiffChangeType.Insert)
+                sourceFileLabelTemplate = FileLabelTemplateBetweenLines;
+            else
+                sourceFileLabelTemplate = FileLabelTemplateLinesRange;
+
+            string sourceFileLabel = string.Format(
+                    sourceFileLabelTemplate,
+                    _marginCore.VersionControlItem.ServerItem,
+                    "T;" /* Latest version token */,
+                    diffChange.OriginalStart + 1,
+                    diffChange.OriginalEnd + 1);
+
+            string targetFileLabelTemplate;
+            if (diffChange.ModifiedStart == diffChange.ModifiedEnd)
+                targetFileLabelTemplate = FileLabelTemplateSingleLine;
+            else if (diffChange.ChangeType == DiffChangeType.Delete)
+                targetFileLabelTemplate = FileLabelTemplateBetweenLines;
+            else
+                targetFileLabelTemplate = FileLabelTemplateLinesRange;
+
+            string targetFileLabel = string.Format(
+                    targetFileLabelTemplate,
+                    _marginCore.TextDocument.FilePath,
+                    string.Empty /* No additional parameter */,
+                    diffChange.ModifiedStart + 1,
+                    diffChange.ModifiedEnd + 1);
+
+            const bool RemoveLastLineTerminator = true;
+
+            string sourceText = _marginCore.GetOriginalText(diffChange, RemoveLastLineTerminator);
+            string sourceFilePath = System.IO.Path.GetTempFileName();
+            if (!string.IsNullOrEmpty(sourceText))
+                File.WriteAllText(sourceFilePath, sourceText);
+
+            string targetText = _marginCore.GetModifiedText(diffChange, RemoveLastLineTerminator);
+            string targetFilePath = System.IO.Path.GetTempFileName();
+            if (!string.IsNullOrEmpty(targetText))
+                File.WriteAllText(targetFilePath, targetText);
+
+            Difference.VisualDiffFiles(
+                sourceFilePath,
+                targetFilePath,
+                SourceFileTag,
+                TargetFileTag,
+                sourceFileLabel,
+                targetFileLabel,
+                IsSourceReadOnly,
+                IsTargetReadOnly,
+                DeleteSourceOnExit,
+                DeleteTargetOnExit);
         }
 
         /// <summary>
