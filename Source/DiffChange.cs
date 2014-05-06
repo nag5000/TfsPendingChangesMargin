@@ -20,9 +20,25 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             OriginalEnd = Math.Max(0, diffChange.OriginalEnd - 1); // exclusive bound to inclusive.
             OriginalLength = diffChange.OriginalLength;
 
-            ModifiedStart = diffChange.ModifiedStart;
-            ModifiedEnd = Math.Max(0, diffChange.ModifiedEnd - 1); // exclusive bound to inclusive.
+            if (ChangeType == DiffChangeType.Delete)
+            {
+                ModifiedStart = Math.Max(0, diffChange.ModifiedEnd - 1); // exclusive upper bound.
+                ModifiedEnd = Math.Max(0, diffChange.ModifiedStart - 1); // exclusive lower bound.
+            }
+            else
+            {
+                ModifiedStart = diffChange.ModifiedStart;
+                ModifiedEnd = Math.Max(0, diffChange.ModifiedEnd - 1); // exclusive bound to inclusive.
+            }
+
             ModifiedLength = diffChange.ModifiedLength;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DiffChange"/> class.
+        /// </summary>
+        private DiffChange()
+        {
         }
 
         /// <summary>
@@ -46,7 +62,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         public int OriginalEnd { get; set; }
 
         /// <summary>
-        /// The inclusive position of the first element in the modified sequence which this change affects.
+        /// The inclusive (exclusive for <see cref="DiffChangeType.Delete"/>) position 
+        /// of the first element in the modified sequence which this change affects.
         /// </summary>
         public int ModifiedStart { get; set; }
 
@@ -56,7 +73,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         public int ModifiedLength { get; set; }
 
         /// <summary>
-        /// The inclusive position of the last element in the modified sequence which this change affects.
+        /// The inclusive (exclusive for <see cref="DiffChangeType.Delete"/>) position 
+        /// of the last element in the modified sequence which this change affects.
         /// </summary>
         public int ModifiedEnd { get; set; }
 
@@ -64,10 +82,33 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// This methods combines two <see cref="IDiffChange"/> objects into one.
         /// </summary>
         /// <param name="diffChange">The diff change to add.</param>
-        /// <returns>An <see cref="IDiffChange"/> that represents <c>this</c> + <see cref="diffChange"/>.</returns>
+        /// <returns>A new instance of <see cref="IDiffChange"/> that represents <c>this</c> + <see cref="diffChange"/>.</returns>
         public IDiffChange Add(IDiffChange diffChange)
         {
-            throw new NotImplementedException();
+            if (diffChange == null)
+                return this;
+
+            int originalStart = Math.Min(OriginalStart, diffChange.OriginalStart);
+            int originalEnd = Math.Max(OriginalEnd, diffChange.OriginalEnd);
+            int modifiedStart = Math.Min(ModifiedStart, diffChange.ModifiedStart);
+            int modifiedEnd = Math.Max(ModifiedEnd, diffChange.ModifiedEnd);
+
+            DiffChangeType changeType;
+            if (ChangeType == diffChange.ChangeType && OriginalStart - diffChange.OriginalEnd == 0 && ModifiedStart - diffChange.ModifiedEnd == 0) 
+                changeType = ChangeType;
+            else 
+                changeType = DiffChangeType.Change;
+
+            return new DiffChange
+            {
+                ChangeType = changeType,
+                OriginalStart = originalStart,
+                OriginalEnd = originalEnd,
+                OriginalLength = originalEnd - originalStart,
+                ModifiedStart = modifiedStart,
+                ModifiedEnd = modifiedEnd,
+                ModifiedLength = modifiedEnd - modifiedStart
+            };
         }
     }
 }

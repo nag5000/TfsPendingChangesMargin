@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -214,17 +215,27 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _contextMenu = new ContextMenu();
 
-            var copyMenuItem = new MenuItem { Header = "Copy commited text" };
+            var copyMenuItem = new MenuItem { Header = "Copy Commited Text" };
             copyMenuItem.Click += CopyCommitedTextMenuItemOnClick;
             _contextMenu.Items.Add(copyMenuItem);
 
-            var rollbackChangeMenuItem = new MenuItem { Header = "Rollback modified text" };
+            var rollbackChangeMenuItem = new MenuItem { Header = "Rollback" };
             rollbackChangeMenuItem.Click += RollbackChangeMenuItemOnClick;
             _contextMenu.Items.Add(rollbackChangeMenuItem);
 
-            var compareChangeRegionMenuItem = new MenuItem { Header = "Compare region with diff tool" };
+            var rollbackAllButThisChangeMenuItem = new MenuItem { Header = "Rollback All But This" };
+            rollbackAllButThisChangeMenuItem.Click += RollbackAllButThisChangeMenuItemOnClick;
+            _contextMenu.Items.Add(rollbackAllButThisChangeMenuItem);
+
+            _contextMenu.Items.Add(new Separator());
+
+            var compareChangeRegionMenuItem = new MenuItem { Header = "Compare Region..." };
             compareChangeRegionMenuItem.Click += CompareChangeRegionMenuItemOnClick;
             _contextMenu.Items.Add(compareChangeRegionMenuItem);
+
+            var compareDocumentMenuItem = new MenuItem { Header = "Compare Document..." };
+            compareDocumentMenuItem.Click += CompareDocumentMenuItemOnClick;
+            _contextMenu.Items.Add(compareDocumentMenuItem);
         }
 
         /// <summary>
@@ -404,6 +415,29 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Event handler that occurs when "Rollback All But This" menu item is clicked.
+        /// </summary>
+        /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
+        /// <param name="routedEventArgs">Event arguments.</param>
+        private void RollbackAllButThisChangeMenuItemOnClick(object sender, RoutedEventArgs routedEventArgs)
+        {
+            try
+            {
+                var marginElement = (FrameworkElement)_contextMenu.PlacementTarget;
+                dynamic data = marginElement.Tag;
+                IDiffChange diffChange = data.DiffChangeInfo;
+
+                RollbackAllButThisChange(diffChange);
+
+                routedEventArgs.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                ShowException(ex);
+            }
+        }
+
+        /// <summary>
         /// Event handler that occurs when "Compare region with diff tool" menu item is clicked.
         /// </summary>
         /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
@@ -418,6 +452,24 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
                 CompareChangeRegion(diffChange);
 
+                routedEventArgs.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                ShowException(ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler that occurs when "Compare document with latest version" menu item is clicked.
+        /// </summary>
+        /// <param name="sender">Event sender (the <see cref="MenuItem"/>).</param>
+        /// <param name="routedEventArgs">Event arguments.</param>
+        private void CompareDocumentMenuItemOnClick(object sender, RoutedEventArgs routedEventArgs)
+        {
+            try
+            {
+                CompareDocumentWithLatestVersion();
                 routedEventArgs.Handled = true;
             }
             catch (Exception ex)
@@ -492,40 +544,130 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             {
                 ITextSnapshot snapshot = edit.Snapshot;
                 ITextSnapshotLine startLine = snapshot.GetLineFromLineNumber(diffChange.ModifiedStart);
+                ITextSnapshotLine endLine = snapshot.GetLineFromLineNumber(diffChange.ModifiedEnd);
 
+                int start;
                 if (diffChange.ChangeType != DiffChangeType.Delete)
                 {
-                    ITextSnapshotLine endLine = snapshot.GetLineFromLineNumber(diffChange.ModifiedEnd);
-
-                    int start = startLine.Start.Position;
+                    start = startLine.Start.Position;
                     int length = endLine.EndIncludingLineBreak.Position - start;
-                    edit.Delete(new Span(start, length));
+                    edit.Delete(start, length);
+                }
+                else
+                {
+                    if (startLine.LineNumber == 0 && endLine.LineNumber == 0)
+                        start = startLine.Start.Position;
+                    else
+                        start = startLine.EndIncludingLineBreak.Position;
                 }
 
                 if (diffChange.ChangeType != DiffChangeType.Insert)
                 {
                     string text = _marginCore.GetOriginalText(diffChange, false);
-                    edit.Insert(startLine.Start.Position, text);
+                    edit.Insert(start, text);
                 }
 
-                if (_undoHistory != null)
-                {
-                    using (ITextUndoTransaction transaction = _undoHistory.CreateTransaction("Rollback modified text"))
-                    {
-                        edit.Apply();
-                        transaction.Complete();
-                    }
-                }
-                else
-                {
-                    edit.Apply();
-                }
+                ApplyEdit(edit, "Rollback Modified Region");
             }
             catch (Exception)
             {
                 edit.Cancel();
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Rollback all modified text in the document except specified <see cref="IDiffChange"/>.
+        /// </summary>
+        /// <param name="diffChange">Information about a specific difference between two sequences.</param>
+        private void RollbackAllButThisChange(IDiffChange diffChange)
+        {
+            ITextEdit edit = _textView.TextBuffer.CreateEdit();
+            Span viewSpan;
+
+            try
+            {
+                string modifiedRegionText = _marginCore.GetModifiedText(diffChange, false);
+                string originalText = _marginCore.GetOriginalText();
+
+                edit.Delete(0, edit.Snapshot.Length);
+                edit.Insert(0, originalText);
+                ApplyEdit(edit, "Undo Modified Text");
+
+                edit = _textView.TextBuffer.CreateEdit();
+
+                ITextSnapshotLine startLine = edit.Snapshot.GetLineFromLineNumber(diffChange.OriginalStart);
+                ITextSnapshotLine endLine = edit.Snapshot.GetLineFromLineNumber(diffChange.OriginalEnd);
+                int start = startLine.Start.Position;
+                int length = endLine.EndIncludingLineBreak.Position - start;
+
+                switch (diffChange.ChangeType)
+                {
+                    case DiffChangeType.Insert:
+                        edit.Insert(start, modifiedRegionText);
+                        viewSpan = new Span(start, modifiedRegionText.Length);
+                        break;
+
+                    case DiffChangeType.Delete:
+                        edit.Delete(start, length);
+                        viewSpan = new Span(start, 0);
+                        break;
+
+                    case DiffChangeType.Change:
+                        edit.Replace(start, length, modifiedRegionText);
+                        viewSpan = new Span(start, modifiedRegionText.Length);
+                        break;
+
+                    default:
+                        throw new InvalidEnumArgumentException();
+                }
+
+                ApplyEdit(edit, "Restore Modified Region");
+            }
+            catch (Exception)
+            {
+                edit.Cancel();
+                throw;
+            }
+
+            var viewSnapshotSpan = new SnapshotSpan(_textView.TextSnapshot, viewSpan);
+            _textView.ViewScroller.EnsureSpanVisible(viewSnapshotSpan, EnsureSpanVisibleOptions.AlwaysCenter);
+        }
+
+        /// <summary>
+        /// Commits all modifications made with specified <see cref="ITextBufferEdit"/> and link the commit 
+        /// with <see cref="ITextUndoTransaction"/> in the Editor, if <see cref="_undoHistory"/> is available.
+        /// </summary>
+        /// <param name="edit">A set of editing operations on an <see cref="ITextBuffer"/>.</param>
+        /// <param name="description">The description of the transaction.</param>
+        private void ApplyEdit(ITextBufferEdit edit, string description)
+        {
+            if (_undoHistory != null)
+            {
+                using (ITextUndoTransaction transaction = _undoHistory.CreateTransaction(description))
+                {
+                    edit.Apply();
+                    transaction.Complete();
+                }
+            }
+            else
+            {
+                edit.Apply();
+            }
+        }
+
+        /// <summary>
+        /// Visual compare current text document with the latest version in Version Control.
+        /// </summary>
+        private void CompareDocumentWithLatestVersion()
+        {
+            Item item = _marginCore.VersionControlItem;
+            VersionControlServer vcs = item.VersionControlServer;
+            ITextDocument textDoc = _marginCore.TextDocument;
+
+            IDiffItem source = Difference.CreateTargetDiffItem(vcs, item.ServerItem, VersionSpec.Latest, 0, VersionSpec.Latest);
+            var target = new DiffItemLocalFile(textDoc.FilePath, textDoc.Encoding.CodePage, textDoc.LastContentModifiedTime, false);
+            Difference.VisualDiffItems(vcs, source, target);
         }
 
         /// <summary>

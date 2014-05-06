@@ -233,6 +233,20 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
+        /// Get a committed text.
+        /// </summary>
+        /// <returns>Original text from the <see cref="VersionControlItem"/>.</returns>
+        public string GetOriginalText()
+        {
+            lock (_versionControlItemStreamLockObject)
+            {
+                var encoding = Encoding.GetEncoding(_versionControlItem.Encoding);
+                string text = ReadText(_versionControlItemStream, encoding);
+                return text;
+            }
+        }
+
+        /// <summary>
         /// Get a committed text from the original sequence of the <see cref="IDiffChange"/>.
         /// </summary>
         /// <param name="diffChange">Information about a specific difference between two sequences.</param>
@@ -271,6 +285,17 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                     text = text.Remove(text.Length - 1);
             }
 
+            return text;
+        }
+
+        /// <summary>
+        /// Get a local text.
+        /// </summary>
+        /// <returns>Text from the <see cref="TextDocument"/>.</returns>
+        public string GetModifiedText()
+        {
+            ITextSnapshot textSnapshot = _textView.TextSnapshot;
+            string text = textSnapshot.GetText();
             return text;
         }
 
@@ -329,17 +354,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         }
 
         /// <summary>
-        /// <see cref="DiffUtil.Diff"/> behaves incorrectly if the stream terminates in blank line - in that case it isn't considered. 
-        /// And as a result, changes are calculated incorrectly. 
-        /// This method is called for both compared streams before comparing and adds a nonblank line to them.
+        /// Reading stream in text string.
         /// </summary>
-        /// <param name="stream">Stream to which bytes will be added.</param>
+        /// <param name="stream">Readable stream.</param>
         /// <param name="encoding">Stream encoding.</param>
-        private static void AppendShiftTokenToStream(Stream stream, Encoding encoding)
+        /// <returns>Stream content as string.</returns>
+        private static string ReadText(Stream stream, Encoding encoding)
         {
-            stream.Seek(0, SeekOrigin.End);
-            byte[] eofShiftBytes = encoding.GetBytes(Environment.NewLine + "0");
-            stream.Write(eofShiftBytes, 0, eofShiftBytes.Length);
+            stream.Position = 0;
+            using (var reader = new StreamReader(stream, encoding, false, 1024, true))
+            {
+                return reader.ReadToEnd();
+            }
         }
 
         /// <summary>
@@ -615,8 +641,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             var stream = new MemoryStream();
             _versionControlItem.DownloadFile().CopyTo(stream);
-            AppendShiftTokenToStream(stream, Encoding.GetEncoding(_versionControlItem.Encoding));
-
             _versionControlItemStream = stream;
         }
 
@@ -689,7 +713,6 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Encoding sourceStreamEncoding = _textDoc.Encoding;
             byte[] textBytes = sourceStreamEncoding.GetBytes(textSnapshot.GetText());
             sourceStream.Write(textBytes, 0, textBytes.Length);
-            AppendShiftTokenToStream(sourceStream, sourceStreamEncoding);
 
             DiffSummary diffSummary;
             lock (_versionControlItemStreamLockObject)
@@ -737,7 +760,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 }
                 else
                 {
-                    AddLineToDiffLinesCollection(dict, textSnapshot, diff.ModifiedEnd, diff);
+                    AddLineToDiffLinesCollection(dict, textSnapshot, diff.ModifiedStart, diff);
                 }
             }
 

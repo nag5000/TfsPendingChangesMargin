@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 
 using Microsoft.TeamFoundation.Diff;
 using Microsoft.VisualStudio.Text;
@@ -61,6 +62,16 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="diffChangeInfo">Information about the difference of line.</param>
         public void Add(ITextSnapshotLine line, IDiffChange diffChangeInfo)
         {
+            ITextSnapshotLine existsLine = _diffDict.Keys.FirstOrDefault(x => x.LineNumber == line.LineNumber);
+            if (existsLine != null)
+            {
+                IDiffChange oldDiffChangeInfo = _diffDict[existsLine];
+                diffChangeInfo = oldDiffChangeInfo.Add(diffChangeInfo);
+
+                _dict[oldDiffChangeInfo.ChangeType].Remove(existsLine);
+                _diffDict.Remove(existsLine);
+            }
+
             _dict[diffChangeInfo.ChangeType].Add(line);
             _diffDict[line] = diffChangeInfo;
         }
