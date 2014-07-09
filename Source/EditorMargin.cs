@@ -70,6 +70,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         private ContextMenu _contextMenu;
 
+        /// <summary>
+        /// Menu item for copying commited text to the Clipboard.
+        /// </summary>
+        private MenuItem _copyMenuItem;
+
         #endregion Fields
 
         #region IWpfTextViewMargin Members
@@ -215,9 +220,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _contextMenu = new ContextMenu();
 
-            var copyMenuItem = new MenuItem { Header = "Copy Commited Text" };
-            copyMenuItem.Click += CopyCommitedTextMenuItemOnClick;
-            _contextMenu.Items.Add(copyMenuItem);
+            _copyMenuItem = new MenuItem { Header = "Copy Commited Text" };
+            _copyMenuItem.Click += CopyCommitedTextMenuItemOnClick;
+            _contextMenu.Items.Add(_copyMenuItem);
 
             var rollbackChangeMenuItem = new MenuItem { Header = "Rollback" };
             rollbackChangeMenuItem.Click += RollbackChangeMenuItemOnClick;
@@ -517,7 +522,14 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="args">Event arguments.</param>
         private void OnMarginElementMouseLeftButtonUp(object sender, MouseButtonEventArgs args)
         {
-            _contextMenu.PlacementTarget = (UIElement)sender;
+            var element = (FrameworkElement)sender;
+
+            // Disable copying commited text if diff inserted (otherwise an empty string is always copied).
+            dynamic data = element.Tag;
+            IDiffChange diffChange = data.DiffChangeInfo;
+            _copyMenuItem.IsEnabled = diffChange.ChangeType != DiffChangeType.Insert;
+
+            _contextMenu.PlacementTarget = element;
             _contextMenu.IsOpen = true;
             args.Handled = true;
         }
