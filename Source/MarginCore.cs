@@ -622,14 +622,31 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <exception cref="TeamFoundationServiceUnavailableException">Team Foundation Service unavailable.</exception>
         private Item GetVersionControlItem()
         {
+            string itemPath = _textDoc.FilePath;
+
+            Workspace workspace;
+            try
+            {
+                workspace = _versionControl.GetWorkspace(itemPath);
+            }
+            catch (ItemNotMappedException ex)
+            {
+                string msg = string.Format("No workspace is found associated with the \"{0}\".", itemPath);
+                throw new VersionControlItemNotFoundException(msg, ex);
+            }
+
+            PendingChange[] pendingChanges = workspace.GetPendingChanges(itemPath);
+            if (pendingChanges.Length == 1 && pendingChanges[0].IsRename)
+                itemPath = pendingChanges[0].SourceServerItem;
+
             try
             {
                 // Be careful, VersionControlServer.GetItem is slow.
-                return _versionControl.GetItem(_textDoc.FilePath, VersionSpec.Latest);
+                return _versionControl.GetItem(itemPath, VersionSpec.Latest);
             }
             catch (VersionControlException ex)
             {
-                string msg = string.Format("Item not found in repository on path \"{0}\".", _textDoc.FilePath);
+                string msg = string.Format("Item not found in repository on path \"{0}\".", itemPath);
                 throw new VersionControlItemNotFoundException(msg, ex);
             }
         }
