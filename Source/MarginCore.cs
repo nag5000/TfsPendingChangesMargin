@@ -190,7 +190,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="vsServiceProvider">Visual Studio service provider.</param>
         /// <param name="formatMapService">Service that provides the <see cref="IEditorFormatMap"/>.</param>
         /// <param name="scrollMapFactoryService">Factory that creates or reuses an <see cref="IScrollMap"/> for an <see cref="ITextView"/>.</param>
-        public MarginCore(IWpfTextView textView, ITextDocumentFactoryService textDocumentFactoryService, SVsServiceProvider vsServiceProvider, IEditorFormatMapService formatMapService, IScrollMapFactoryService scrollMapFactoryService)
+        public MarginCore(
+            IWpfTextView textView,
+            ITextDocumentFactoryService textDocumentFactoryService,
+            SVsServiceProvider vsServiceProvider,
+            IEditorFormatMapService formatMapService,
+            IScrollMapFactoryService scrollMapFactoryService)
         {
             Debug.WriteLine("Entering constructor.", Properties.Resources.ProductName);
 
@@ -477,6 +482,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             if (marginIsActivated)
             {
+                //todo: maybe _textDoc.TextBuffer.ChangedLowPriority instead of LayoutChanged?
+                //todo: надо как-то поумнее сделать, чтобы на каждый набранный символ в строке не производить diff?
+
                 _textView.LayoutChanged += OnTextViewLayoutChanged;
                 _textView.ZoomLevelChanged += OnTextViewZoomLevelChanged;
                 _textDoc.FileActionOccurred += OnTextDocFileActionOccurred;
@@ -572,11 +580,16 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             {
                 try
                 {
-                    const int VersionControlItemObservationInterval = 30000;
+                    const int VersionControlItemObservationInterval = 60000;
                     System.Threading.Thread.Sleep(VersionControlItemObservationInterval);
 
                     if (cancellationToken.IsCancellationRequested)
                         break;
+
+                    ////bool hasFocus = _textView.HasAggregateFocus;
+                    bool isVisible = _textView.VisualElement.IsVisible;
+                    if (!isVisible)
+                        continue;
 
                     lock (_drawLockObject)
                     {
