@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
+using Task = System.Threading.Tasks.Task;
 
 using AlekseyNagovitsyn.TfsPendingChangesMargin.Settings;
 
@@ -420,8 +420,8 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             var diffOptions = new DiffOptions { UseThirdPartyTool = false };
 
-            // TODO: make flag IgnoreLeadingAndTrailingWhiteSpace configurable via "Tools|Options..." dialog (TfsPendingChangesMargin settings).
-            diffOptions.Flags = diffOptions.Flags | DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
+            if (TfsPendingChangesMarginPackage.IgnoreLeadingAndTrailingWhiteSpace)
+                diffOptions.Flags |= DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
 
             originalStream.Position = 0;
             modifiedStream.Position = 0;
