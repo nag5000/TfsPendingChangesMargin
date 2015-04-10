@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using AlekseyNagovitsyn.TfsPendingChangesMargin.Settings;
 using EnvDTE;
 using Microsoft.VisualStudio.Shell;
 
@@ -18,17 +19,30 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
     [PackageRegistration(UseManagedResourcesOnly = true)]
     [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)]
     [Guid("9ec6e3aa-48cd-4953-b3b7-1a203bfded7f")]
-    [ProvideOptionPage(typeof(Settings.OptionPage), "Tfs Pending Changes Margin", "General", 0, 0, true)]
+    [ProvideOptionPage(typeof(GeneralSettingsPage), "Tfs Pending Changes Margin", "General", 0, 0, true)]
     public sealed class TfsPendingChangesMarginPackage : Package
     {
-        public static bool IgnoreLeadingAndTrailingWhiteSpace
+        /// <summary>
+        /// Returns the settings from the Tools|Options... dialog's Tfs Pending Changes Margin|General section
+        /// </summary>
+        public static EnvDTE.Properties GetGeneralSettings()
         {
-            get
-            {
-                var dte = (DTE)GetGlobalService(typeof(DTE));
-                EnvDTE.Properties properties = dte.Properties["Tfs Pending Changes Margin", "General"];
-                return (bool)properties.Item("IgnoreLeadingAndTrailingWhiteSpace").Value;
-            }
+            var dte = (DTE)GetGlobalService(typeof(DTE));
+            return dte.Properties["Tfs Pending Changes Margin", "General"];
+        }
+
+        /// <summary>
+        /// Event raised when the settings on the <see cref="GeneralSettingsPage"/> are changed
+        /// </summary>
+        public static event Action GeneralSettingsChanged;
+
+        /// <summary>
+        /// Raises the <see cref="GeneralSettingsChanged"/> event.
+        /// </summary>
+        public static void RaiseGeneralSettingsChanged()
+        {
+            if (GeneralSettingsChanged != null)
+                GeneralSettingsChanged();
         }
     }
 }

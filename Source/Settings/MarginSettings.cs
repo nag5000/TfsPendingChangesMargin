@@ -30,6 +30,12 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin.Settings
         public Brush RemovedLineMarginBrush { get; set; }
 
         /// <summary>
+        /// If true, the margin will not show lines where the only changes are to leading or trailing white space.
+        /// </summary>
+        /// <remarks>This is configured on the <see cref="Settings.GeneralSettingsPage"/></remarks>
+        public bool IgnoreLeadingAndTrailingWhiteSpace { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of margin settings.
         /// </summary>
         /// <param name="formatMap">Map that contains format definitions for Visual Studio editor.</param>
@@ -47,6 +53,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin.Settings
             AddedLineMarginBrush = _formatMap.GetForeground<AddedLineMarginFormatDefinition>();
             ModifiedLineMarginBrush = _formatMap.GetForeground<ModifiedLineMarginFormatDefinition>();
             RemovedLineMarginBrush = _formatMap.GetForeground<RemovedLineMarginFormatDefinition>();
+
+            var generalSettings = TfsPendingChangesMarginPackage.GetGeneralSettings();
+            IgnoreLeadingAndTrailingWhiteSpace = (bool)generalSettings.Item("IgnoreLeadingAndTrailingWhiteSpace").Value;
         }
     }
 }

@@ -10,24 +10,32 @@ using Microsoft.VisualStudio.Shell;
 namespace AlekseyNagovitsyn.TfsPendingChangesMargin.Settings
 {
     /// <summary>
-    /// This page is a basic grid including any settings used by the TfsPendingChangesMargin extension.
+    /// This page is a basic grid including any non-format related settings used by this extension.
     /// 
     /// The ProvideOptionPageAttribute on the TfsPendingChangesMarginPackage is used to add this page
     /// to the Visual Studio Tools-> Options dialog.
     /// </summary>
     [ClassInterface(ClassInterfaceType.AutoDual)]
     [CLSCompliant(false), ComVisible(true)]
-    public class OptionPage : DialogPage
+    public class GeneralSettingsPage : DialogPage
     {
         [Category("Diff Options")]
         [DisplayName("Ignore leading and trailing white space")]
         [Description("If True, the margin will not show lines where the only changes are to leading or trailing white space")]
         public bool IgnoreLeadingAndTrailingWhiteSpace { get; set; }
 
-        public OptionPage()
+        public GeneralSettingsPage()
         {
             // TODO: in C# 6, default values for properties can be specified inline so this constructor can be removed
             IgnoreLeadingAndTrailingWhiteSpace = true;
+        }
+
+        protected override void OnApply(PageApplyEventArgs e)
+        {
+            base.OnApply(e);
+
+            if (e.ApplyBehavior == ApplyKind.Apply)
+                TfsPendingChangesMarginPackage.RaiseGeneralSettingsChanged();
         }
     }
 }

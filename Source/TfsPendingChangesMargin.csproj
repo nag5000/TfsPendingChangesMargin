@@ -96,7 +96,7 @@
     <Compile Include="Settings\EditorFormatMapExtensions.cs" />
     <Compile Include="Settings\MarginSettings.cs" />
     <Compile Include="Settings\ModifiedLineMarginFormatDefinition.cs" />
-    <Compile Include="Settings\OptionPage.cs">
+    <Compile Include="Settings\GeneralSettingsPage.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Settings\RemovedLineMarginFormatDefinition.cs" />

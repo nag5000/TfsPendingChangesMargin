@@ -416,11 +416,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// <param name="modifiedStream">Modified stream.</param>
         /// <param name="modifiedEncoding">Encoding of modified stream.</param>
         /// <returns>A summary of the differences between two streams.</returns>
-        private static DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
+        private DiffSummary GetDifference(Stream originalStream, Encoding originalEncoding, Stream modifiedStream, Encoding modifiedEncoding)
         {
             var diffOptions = new DiffOptions { UseThirdPartyTool = false };
 
-            if (TfsPendingChangesMarginPackage.IgnoreLeadingAndTrailingWhiteSpace)
+            if (_marginSettings.IgnoreLeadingAndTrailingWhiteSpace)
                 diffOptions.Flags |= DiffOptionFlags.IgnoreLeadingAndTrailingWhiteSpace;
 
             originalStream.Position = 0;
@@ -481,6 +481,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _textView.ZoomLevelChanged += OnTextViewZoomLevelChanged;
                 _textDoc.FileActionOccurred += OnTextDocFileActionOccurred;
                 _formatMap.FormatMappingChanged += OnFormatMapFormatMappingChanged;
+                TfsPendingChangesMarginPackage.GeneralSettingsChanged += OnGeneralSettingsChanged;
                 _versionControl.CommitCheckin += OnVersionControlCommitCheckin;
                 _scrollMap.MappingChanged += OnScrollMapMappingChanged;
 
@@ -495,6 +496,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 _textView.ZoomLevelChanged -= OnTextViewZoomLevelChanged;
                 _textDoc.FileActionOccurred -= OnTextDocFileActionOccurred;
                 _formatMap.FormatMappingChanged -= OnFormatMapFormatMappingChanged;
+                TfsPendingChangesMarginPackage.GeneralSettingsChanged -= OnGeneralSettingsChanged;
                 _versionControl.CommitCheckin -= OnVersionControlCommitCheckin;
                 _scrollMap.MappingChanged -= OnScrollMapMappingChanged;
 
@@ -828,6 +830,18 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             _marginSettings.Refresh();
             Redraw(true, MarginDrawReason.EditorFormatMapChanged);
+        }
+
+        /// <summary>
+        /// Event handler called when settings are changed on the <see cref="Settings.GeneralSettingsPage"/>.
+        /// </summary>
+        private void OnGeneralSettingsChanged()
+        {
+            _marginSettings.Refresh();
+
+            // Note that because the IgnoreLeadingAndTrailingWhiteSpace setting can change which
+            // lines are considered to have been modified, the useCache parameter must be false.
+            Redraw(false, MarginDrawReason.GeneralSettingsChanged);
         }
 
         /// <summary>

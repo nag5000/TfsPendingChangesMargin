@@ -44,6 +44,11 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         EditorFormatMapChanged,
 
         /// <summary>
+        /// A setting on the <see cref="Settings.GeneralSettingsPage"/> has been changed.
+        /// </summary>
+        GeneralSettingsChanged,
+
+        /// <summary>
         /// The mapping has been changed between a character position and its vertical fraction.
         /// </summary>
         ScrollMapMappingChanged
