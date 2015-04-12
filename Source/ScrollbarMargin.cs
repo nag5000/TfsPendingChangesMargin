@@ -163,6 +163,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 case MarginDrawReason.TextDocFileActionOccurred:
                 case MarginDrawReason.TextViewTextChanged:
                 case MarginDrawReason.EditorFormatMapChanged:
+                case MarginDrawReason.GeneralSettingsChanged:
                 case MarginDrawReason.ScrollMapMappingChanged:
                     DrawMargins(e.DiffLines);
                     break;

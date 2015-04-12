@@ -273,6 +273,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 case MarginDrawReason.TextViewTextChanged:
                 case MarginDrawReason.TextViewLayoutChanged:
                 case MarginDrawReason.EditorFormatMapChanged:
+                case MarginDrawReason.GeneralSettingsChanged:
                     DrawMargins(e.DiffLines);
                     break;
 
