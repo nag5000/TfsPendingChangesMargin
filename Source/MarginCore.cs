@@ -229,7 +229,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
 
             _tfExt.ProjectContextChanged -= OnTfExtProjectContextChanged;
             _cachedChangedLines.Clear();
-            _versionControlItemStream.Dispose();
+
+            if (_versionControlItemStream != null)
+                _versionControlItemStream.Dispose();
         }
 
         /// <summary>
@@ -515,6 +517,9 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
                 lock (_drawLockObject)
                 {
                     bool success = RefreshVersionControl();
+                    if (_isDisposed)
+                        return;
+
                     SetMarginActivated(success);
                     Redraw(false, MarginDrawReason.InternalReason);
                 }
@@ -658,8 +663,15 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         /// </summary>
         private void DownloadVersionControlItem()
         {
+            if (_isDisposed)
+                return;
+
             var stream = new MemoryStream();
             _versionControlItem.DownloadFile().CopyTo(stream);
+
+            if (_isDisposed)
+                return;
+
             _versionControlItemStream = stream;
         }
 
@@ -672,7 +684,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
         {
             try
             {
-                if (_textView.IsClosed)
+                if (_isDisposed || _textView.IsClosed)
                     return;
 
                 if (!_isActivated)
