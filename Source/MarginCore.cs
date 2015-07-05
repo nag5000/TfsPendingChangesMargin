@@ -195,7 +195,7 @@ namespace AlekseyNagovitsyn.TfsPendingChangesMargin
             Debug.WriteLine("Entering constructor.", Properties.Resources.ProductName);
 
             _textView = textView;
-            if (!textDocumentFactoryService.TryGetTextDocument(_textView.TextBuffer, out _textDoc))
+            if (!textDocumentFactoryService.TryGetTextDocument(_textView.TextDataModel.DocumentBuffer, out _textDoc))
             {
                 Debug.WriteLine("Can not retrieve TextDocument. Margin is disabled.", Properties.Resources.ProductName);
                 _isEnabled = false;
