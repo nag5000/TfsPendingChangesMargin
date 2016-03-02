@@ -80,7 +80,7 @@
     <Reference Include="Microsoft.TeamFoundation.VersionControl.Common">
       <HintPath>..\..\..\Program Files\Microsoft Visual Studio 14.0\Common7\IDE\Extensions\pzcqlhzv.qi0\Microsoft.TeamFoundation.VersionControl.Common.dll</HintPath>
     </Reference>
-    <Reference Include="Microsoft.VisualStudio.CoreUtility, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
+    <Reference Include="Microsoft.VisualStudio.CoreUtility" />
     <Reference Include="Microsoft.VisualStudio.OLE.Interop" />
     <Reference Include="Microsoft.VisualStudio.Services.Common">
       <HintPath>..\..\..\Program Files\Microsoft Visual Studio 14.0\Common7\IDE\Extensions\pzcqlhzv.qi0\Microsoft.VisualStudio.Services.Common.dll</HintPath>
@@ -94,10 +94,10 @@
     <Reference Include="Microsoft.VisualStudio.TeamFoundation">
       <HintPath>..\..\..\Program Files\Microsoft Visual Studio 14.0\Common7\IDE\Extensions\pzcqlhzv.qi0\Microsoft.VisualStudio.TeamFoundation.dll</HintPath>
     </Reference>
-    <Reference Include="Microsoft.VisualStudio.Text.Data, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
-    <Reference Include="Microsoft.VisualStudio.Text.Logic, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
-    <Reference Include="Microsoft.VisualStudio.Text.UI, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
-    <Reference Include="Microsoft.VisualStudio.Text.UI.Wpf, Version=14.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
+    <Reference Include="Microsoft.VisualStudio.Text.Data" />
+    <Reference Include="Microsoft.VisualStudio.Text.Logic" />
+    <Reference Include="Microsoft.VisualStudio.Text.UI" />
+    <Reference Include="Microsoft.VisualStudio.Text.UI.Wpf" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
